@@ -171,7 +171,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory="$ROOT/build"
+WorkingDirectory=$ROOT/build
 ExecStart="$ROOT/run.sh"
 Restart=always
 RestartSec=5
