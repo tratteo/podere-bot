@@ -19,15 +19,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include=".env">
+    <Content Include=".env" Condition="Exists('.env')">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
+    </Content>
     <EmbeddedResource Include="appsettings.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>
+    <Content Remove="Prompts\**" />
     <Content Include="Prompts\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

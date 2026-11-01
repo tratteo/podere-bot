@@ -1,5 +1,4 @@
 ﻿using Newtonsoft.Json;
-using PodereBot.Services;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -8,8 +7,8 @@ using Telegram.Bot.Types.ReplyMarkups;
 namespace PodereBot.Lib.Commands;
 
 [CommandMetadata(Key = "/myinfo", Description = "Ti mando le info Telegram del tuo profilo 🔎")]
-internal class UserInfoCommand(Skin skin, IConfiguration configuration, ILogger<UserInfoCommand> logger)
-    : Command(skin, logger, configuration)
+internal class UserInfoCommand(IConfiguration configuration, ILogger<UserInfoCommand> logger)
+    : Command(logger, configuration)
 {
     private User? user;
 

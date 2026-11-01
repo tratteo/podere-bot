@@ -18,6 +18,22 @@ internal class MockTemperatureDriver(Database db) : ITemperatureDriver
         return await Task.FromResult((float?)currentTemp);
     }
 
+    public async Task<LocalTemperatureProbe> ProbeLocalTemperature(CancellationToken? token = null)
+    {
+        var temperature = await GetLocalTemperature(token);
+        return new LocalTemperatureProbe
+        {
+            Status = LocalTemperatureStatus.Ok,
+            Temperature = temperature,
+            LastSuccessUtc = DateTime.UtcNow,
+            DevicesRootExists = true,
+            BusMasterPresent = true,
+            OverlayConfigured = true,
+            Sensors = ["mock"],
+            CrcValid = true,
+        };
+    }
+
     public List<TemperatureReading> GetExternalTemperatureReadings(TimeSpan? tolerance = null)
     {
         if (tolerance == null)

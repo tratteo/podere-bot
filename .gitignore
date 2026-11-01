@@ -5,6 +5,10 @@ project.lock.json
 *.pyc
 nupkg/
 .env
+admins.json
+usage.json
+run.sh
+patch.sh
 
 # Visual Studio Code
 .vscode

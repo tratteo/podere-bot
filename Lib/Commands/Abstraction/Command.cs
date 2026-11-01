@@ -14,10 +14,9 @@ internal readonly struct CommandArguments
     public readonly bool Admin { get; init; }
 }
 
-internal abstract class Command(Skin skin, ILogger<Command> logger, IConfiguration configuration)
+internal abstract class Command(ILogger<Command> logger, IConfiguration configuration)
 {
     protected readonly string instanceId = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
-    protected readonly Skin skin = skin;
     private readonly ILogger<Command> logger = logger;
     protected readonly IConfiguration configuration = configuration;
     private static readonly string callbackDataSeparator = "♦";
@@ -88,11 +87,9 @@ internal abstract class Command(Skin skin, ILogger<Command> logger, IConfigurati
         if (!arguments.Admin)
             return true;
 
-        var admins = configuration.GetSection("Admins").Get<long[]>()?.ToList() ?? [];
-        if (!admins.Contains(arguments.Message.From!.Id))
+        if (!AdminList.Get(configuration).Contains(arguments.Message.From!.Id))
         {
             await arguments.Client.SendChatAction(arguments.Message.Chat.Id, ChatAction.ChooseSticker);
-            await arguments.Client.SendAsset(arguments.Message, skin.Schema.Unauthorized);
             await arguments.Client.SendMessage(arguments.Message.Chat.Id, "Non hai abbastanza poteri canide 🐶", disableNotification: true);
             return false;
         }

@@ -10,12 +10,12 @@ namespace PodereBot.Lib.Commands;
 
 [CommandMetadata(Key = "/temperatures", Description = "Ti mando tutte le temperature dei sensori della casa 🌡️")]
 internal class TemperaturesCommand(
-    Skin skin,
     ILogger<StartCommand> logger,
     IConfiguration configuration,
     ITemperatureDriver temperatureDriver
-) : Command(skin, logger, configuration)
+) : Command(logger, configuration)
 {
+    private static readonly CultureInfo Culture = CultureInfo.GetCultureInfo("it-IT");
     private readonly System.Timers.Timer refreshTimer = new(TimeSpan.FromSeconds(5));
     private readonly InlineKeyboardMarkup kbd = new();
 
@@ -25,42 +25,19 @@ internal class TemperaturesCommand(
         return Task.CompletedTask;
     }
 
-    private string GetTemperatureString(string name, float? temperature, DateTime? timestamp = null)
-    {
-        var tempStr =
-            $"<b>{(temperature != null ? $"{temperature:F2}°" : "non disponibile 😵")} {(timestamp != null ? $"({timestamp.Humanize()})" : "")}</b>";
-        return string.Format("{0} {1}", name, tempStr.PadLeft(40));
-    }
-
-    private async Task<string> GetHtmlStatusMessage(bool computeTemperatures)
-    {
-        var msg = new StringBuilder();
-        if (computeTemperatures)
-        {
-            var temp = await temperatureDriver.GetLocalTemperature();
-            var externalReadings = temperatureDriver.GetExternalTemperatureReadings();
-            msg.AppendLine($"🌡️ Temperature");
-            msg.AppendLine(GetTemperatureString("Host", temp));
-            foreach (var r in externalReadings)
-            {
-                msg.AppendLine(GetTemperatureString(r.Location, r.Temperature, r.Timestamp));
-            }
-            return msg.ToString();
-        }
-        else
-        {
-            return $"🌡️ Sto calcolando le temperature...";
-        }
-    }
-
     protected override async Task ExecuteInternal()
     {
         AttachEvents();
         await Arguments.Client.SendChatAction(Arguments.Message.Chat.Id, ChatAction.Typing);
-        var msg = await GetHtmlStatusMessage(false);
         kbd.AddButton("Chiudi", EncodeCallbackQueryData("cancel"));
         var message = await Arguments
-            .Client.SendMessage(Arguments.Message.Chat.Id, msg, replyMarkup: kbd, parseMode: ParseMode.Html, disableNotification: true)
+            .Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "🌡️ <b>Temperature</b>\n\nSto leggendo i sensori…",
+                replyMarkup: kbd,
+                parseMode: ParseMode.Html,
+                disableNotification: true
+            )
             .DeleteOnDetach(this);
         await UpdateStatusMessage(message);
         refreshTimer.Elapsed += (_, _) => _ = UpdateStatusMessage(message);
@@ -77,13 +54,144 @@ internal class TemperaturesCommand(
             await Arguments.Client.EditMessageText(
                 message.Chat.Id,
                 message.Id,
-                await GetHtmlStatusMessage(true),
+                await BuildMessage(),
                 replyMarkup: kbd,
                 parseMode: ParseMode.Html
             );
         }
         catch (Exception) { }
     }
+
+    private async Task<string> BuildMessage()
+    {
+        var probe = await temperatureDriver.ProbeLocalTemperature();
+        var externals = temperatureDriver.GetExternalTemperatureReadings();
+
+        var sb = new StringBuilder();
+        sb.AppendLine(probe.Status == LocalTemperatureStatus.Ok ? "🟢 <b>Temperature</b>" : "🔴 <b>Temperature</b>");
+        sb.AppendLine();
+        sb.AppendLine($"<pre>{BuildReadingsBlock(probe, externals)}</pre>");
+
+        if (probe.Status != LocalTemperatureStatus.Ok)
+        {
+            sb.AppendLine();
+            sb.AppendLine("⚠️ <b>Sensore host non disponibile</b>");
+            sb.AppendLine($"<pre>{BuildDiagnosticsBlock(probe)}</pre>");
+            sb.AppendLine($"<i>{Describe(probe)}</i>");
+            if (!string.IsNullOrWhiteSpace(probe.Error))
+                sb.AppendLine($"<i>{Escape(probe.Error)}</i>");
+            if (!string.IsNullOrWhiteSpace(probe.KernelHint))
+                sb.AppendLine($"<i>kernel: {Escape(probe.KernelHint)}</i>");
+        }
+
+        return sb.ToString();
+    }
+
+    private static string BuildReadingsBlock(LocalTemperatureProbe probe, List<TemperatureReading> externals)
+    {
+        var rows = new List<(string Label, string Value, string Age)> { ("Host", FormatTemperature(probe.Temperature), "") };
+        foreach (var reading in externals)
+        {
+            var age = FormatAge(DateTime.UtcNow - reading.Timestamp);
+            rows.Add((Escape(reading.Location), FormatTemperature(reading.Temperature), age));
+        }
+
+        var labelWidth = rows.Max(r => r.Label.Length);
+        var valueWidth = rows.Max(r => r.Value.Length);
+
+        var sb = new StringBuilder();
+        foreach (var (label, value, age) in rows)
+        {
+            if (sb.Length > 0)
+                sb.Append('\n');
+            sb.Append(label.PadRight(labelWidth)).Append("  ").Append(value.PadRight(valueWidth));
+            if (!string.IsNullOrEmpty(age))
+                sb.Append("  ").Append(age);
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildDiagnosticsBlock(LocalTemperatureProbe probe)
+    {
+        var rows = new List<(string Label, string Value)>
+        {
+            ("Bus 1-Wire", DescribeBus(probe)),
+            ("Sensori", probe.Sensors.Count.ToString("0", Culture)),
+            ("Overlay", DescribeOverlay(probe.OverlayConfigured)),
+            ("Ultima OK", probe.LastSuccessUtc.HasValue ? probe.LastSuccessUtc.Humanize() : "mai"),
+            ("Tentativi", probe.ConsecutiveFailures.ToString("0", Culture)),
+            ("Causa", DescribeCause(probe)),
+        };
+
+        var width = rows.Max(r => r.Label.Length);
+        var sb = new StringBuilder();
+        foreach (var (label, value) in rows)
+        {
+            if (sb.Length > 0)
+                sb.Append('\n');
+            sb.Append(label.PadRight(width)).Append("  ").Append(value);
+        }
+        return sb.ToString();
+    }
+
+    private static string DescribeBus(LocalTemperatureProbe probe)
+    {
+        if (!probe.DevicesRootExists)
+            return "assente";
+        return probe.BusMasterPresent ? "ok" : "senza master";
+    }
+
+    private static string DescribeOverlay(bool? configured) =>
+        configured switch
+        {
+            true => "configurato",
+            false => "assente",
+            _ => "sconosciuto",
+        };
+
+    private static string DescribeCause(LocalTemperatureProbe probe) =>
+        probe.Status switch
+        {
+            LocalTemperatureStatus.DevicesRootMissing => "configurazione",
+            LocalTemperatureStatus.BusMasterMissing => "configurazione",
+            LocalTemperatureStatus.NoSensors => "hardware",
+            LocalTemperatureStatus.CrcError => "segnale",
+            LocalTemperatureStatus.ReadError => "hardware",
+            LocalTemperatureStatus.ParseError => "firmware",
+            _ => "-",
+        };
+
+    private static string Describe(LocalTemperatureProbe probe) =>
+        probe.Status switch
+        {
+            LocalTemperatureStatus.DevicesRootMissing =>
+                "Bus 1-Wire assente: manca dtoverlay=w1-gpio in config.txt o il modulo non è caricato.",
+            LocalTemperatureStatus.BusMasterMissing => "Bus presente ma master 1-Wire non registrato: driver non caricato.",
+            LocalTemperatureStatus.NoSensors =>
+                "Bus attivo ma nessun sensore risponde: controlla cablaggio, alimentazione e pull-up sul GPIO4.",
+            LocalTemperatureStatus.CrcError =>
+                "Il sensore risponde ma il CRC fallisce: alimentazione parassita o cavo troppo lungo.",
+            LocalTemperatureStatus.ReadError =>
+                "Il nodo del sensore è sparito durante la lettura: il kernel lo ha rimosso dal bus.",
+            LocalTemperatureStatus.ParseError => "Il sensore ha risposto con un formato inatteso.",
+            _ => "Sensore disponibile.",
+        };
+
+    private static string FormatTemperature(float? temperature) =>
+        temperature.HasValue ? $"{temperature.Value.ToString("0.0", Culture)} °C" : "n/d";
+
+    private static string FormatAge(TimeSpan age)
+    {
+        if (age.TotalSeconds < 90)
+            return "ora";
+        if (age.TotalMinutes < 90)
+            return $"{age.Minutes}m";
+        if (age.TotalHours < 36)
+            return $"{age.Hours}h";
+        return $"{age.Days}g";
+    }
+
+    private static string Escape(string value) => value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     protected override async Task OnMessage(Message message, UpdateType type)
     {

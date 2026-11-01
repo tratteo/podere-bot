@@ -13,11 +13,10 @@ namespace PodereBot.Lib.Commands;
 [CommandMetadata(Key = "/heating", Description = "Gestisci il riscaldamento della casa 🔥", Admin = true)]
 internal class HeatingCommand(
     ILogger<HeatingCommand> logger,
-    Skin skin,
     IConfiguration configuration,
     HeatingDriver heatingDriver,
     Database db
-) : Command(skin, logger, configuration)
+) : Command(logger, configuration)
 {
     private readonly System.Timers.Timer refreshTimer = new(TimeSpan.FromSeconds(10));
 

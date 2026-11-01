@@ -27,8 +27,7 @@ internal sealed class AiToolRegistry
         IConfiguration configuration,
         HeatingDriver heatingDriver,
         BotHostedService bot,
-        Skin skin,
-        CryptoAlertDaemon alertDaemon,
+        // CryptoAlertDaemon alertDaemon,
         ILogger<AiToolRegistry> logger
     )
     {
@@ -304,7 +303,7 @@ internal sealed class AiToolRegistry
             AIFunctionFactory.Create(
                 async (long chatId) =>
                 {
-                    await bot.Client.SendVenue(chatId, 41.49802515060315, 12.79789867806239, "Podere 739 (canne libere)", "Via del Valloncello 16");
+                    await bot.Client.SendVenue(chatId, 41.4986180363405, 12.797875896442752, "Podere 739 (canne libere)", "Via del Valloncello 16");
                     return "Posizione inviata.";
                 },
                 new AIFunctionFactoryOptions { Name = "send_position", Description = "Invia la posizione GPS della casa a una chat Telegram" }
@@ -315,22 +314,6 @@ internal sealed class AiToolRegistry
             AIFunctionFactory.Create(
                 async (long chatId) =>
                 {
-                    var asset = skin.Schema.Start;
-                    if (asset != null)
-                    {
-                        switch (asset.Type)
-                        {
-                            case AssetType.video:
-                                await bot.Client.SendVideo(chatId, InputFile.FromString(asset.Source), disableNotification: true);
-                                break;
-                            case AssetType.gif:
-                                await bot.Client.SendAnimation(chatId, InputFile.FromString(asset.Source), disableNotification: true);
-                                break;
-                            case AssetType.sticker:
-                                await bot.Client.SendSticker(chatId, InputFile.FromString(asset.Source), disableNotification: true);
-                                break;
-                        }
-                    }
                     await bot.Client.SendMessage(
                         chatId,
                         $"""
@@ -361,7 +344,8 @@ internal sealed class AiToolRegistry
             )
         );
 
-        // ===== Trading Tools =====
+        /*
+        // ===== Trading Tools (disabled with the crypto alerts engine) =====
 
         functions.Add(
             AIFunctionFactory.Create(
@@ -436,6 +420,7 @@ internal sealed class AiToolRegistry
                 new AIFunctionFactoryOptions { Name = "unsubscribe_trading_alerts", Description = "Rimuove l'utente corrente dagli alert di trading" }
             )
         );
+        */
 
         AllAiFunctions = functions.AsReadOnly();
         AllMcpServerTools = functions.ConvertAll(f => McpServerTool.Create(f));

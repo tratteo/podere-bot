@@ -8,20 +8,18 @@ using Telegram.Bot.Types.ReplyMarkups;
 namespace PodereBot.Lib.Commands.Abstract;
 
 internal abstract class AbstractOpenGateCommand(
-    Skin skin,
     GateDriver gateDriver,
     Database db,
     IConfiguration configuration,
     ILogger<AbstractOpenGateCommand> logger,
     GateId gateId
-) : Command(skin, logger, configuration)
+) : Command(logger, configuration)
 {
     private readonly GateDriver gateDriver = gateDriver;
     private readonly Database db = db;
     private readonly GateId gateId = gateId;
-    private readonly List<long> adminIds = configuration.GetSection("Admins").Get<long[]>()?.ToList() ?? [];
+    private readonly long[] adminIds = AdminList.Get(configuration);
     protected abstract string GateName { get; }
-    protected abstract Asset? Asset { get; }
 
     protected override async Task ExecuteInternal()
     {
@@ -34,7 +32,6 @@ internal abstract class AbstractOpenGateCommand(
             var canOpen = db.Data.GatesOpenAccessExpirationDate != null && DateTime.Now < db.Data.GatesOpenAccessExpirationDate;
             if (!canOpen)
             {
-                await Arguments.Client.SendAsset(Arguments.Message, skin.Schema.Unavailable);
                 await Arguments.Client.SendMessage(
                     Arguments.Message.Chat.Id,
                     "I cancelli sono bloccati al momento ❌",
@@ -85,7 +82,6 @@ internal abstract class AbstractOpenGateCommand(
         {
             await Arguments.Client.SendChatAction(Arguments.Message.Chat.Id, ChatAction.Typing);
             await gateDriver.Open(gateId);
-            await Arguments.Client.SendAsset(Arguments.Message, Asset);
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
                 $"Ho aperto il cancello {GateName} 🐱",

@@ -2,6 +2,7 @@
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Server;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using OpenAI;
 using PodereBot.Lib;
 using PodereBot.Lib.Api;
@@ -15,6 +16,7 @@ Console.WriteLine("========== Podere Bot ==========\n");
 DotNetEnv.Env.Load();
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://0.0.0.0:5050");
+builder.Configuration.AddJsonFile("admins.json", optional: true, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables();
 builder.Services.Configure<ConsoleLifetimeOptions>(options => options.SuppressStatusMessages = true);
 builder.Services.AddCommands();
@@ -40,14 +42,17 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddSingleton<GateDriver>();
-builder.Services.AddSingleton<Skin>();
 builder.Services.AddSingleton<HeatingDriver>();
 builder.Services.AddSingleton<Database>();
+builder.Services.AddSingleton<PendingInputRegistry>();
+builder.Services.AddSingleton<ModelPricing>();
+builder.Services.AddSingleton<UsageTracker>();
 
 builder.Services.AddHostedService<HeatingProgramDaemon>();
 
-builder.Services.AddSingleton<CryptoAlertDaemon>();
-builder.Services.AddHostedService(p => p.GetRequiredService<CryptoAlertDaemon>());
+// Crypto alerts engine disabled.
+// builder.Services.AddSingleton<CryptoAlertDaemon>();
+// builder.Services.AddHostedService(p => p.GetRequiredService<CryptoAlertDaemon>());
 
 builder.Services.AddSingleton<BotHostedService>();
 builder.Services.AddHostedService(p => p.GetRequiredService<BotHostedService>());
@@ -61,12 +66,18 @@ var zenApiKey = builder.Configuration.GetValue<string>("ZEN_API_KEY")!;
 var promptPath = Path.Combine(AppContext.BaseDirectory, "Prompts", "system-prompt.md");
 if (File.Exists(promptPath))
 {
-    builder.Configuration["AI:SystemPrompt"] = File.ReadAllText(promptPath);
+    var prompt = File.ReadAllText(promptPath);
+    var memesPath = Path.Combine(AppContext.BaseDirectory, "Prompts", "memes.json");
+    if (File.Exists(memesPath))
+        prompt += "\n\n## Catalogo meme (JSON)\n" + File.ReadAllText(memesPath);
+    builder.Configuration["AI:SystemPrompt"] = prompt;
 }
 
 builder.Services.AddSingleton<IChatClient>(sp =>
 {
-    var openAiClient = new OpenAIClient(new ApiKeyCredential(zenApiKey), new OpenAIClientOptions { Endpoint = new Uri(endpoint) });
+    var openAiOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint) };
+    openAiOptions.AddPolicy(new OpenCodeSessionPolicy(), PipelinePosition.PerCall);
+    var openAiClient = new OpenAIClient(new ApiKeyCredential(zenApiKey), openAiOptions);
     var innerClient = openAiClient.GetChatClient(model).AsIChatClient();
     return new ChatClientBuilder(innerClient).UseFunctionInvocation().Build(sp);
 });
@@ -84,6 +95,8 @@ builder.Services
     .WithTools(earlySp.GetRequiredService<AiToolRegistry>().AllMcpServerTools);
 
 var app = builder.Build();
+
+app.Services.GetRequiredService<ModelPricing>();
 
 app.Use(Middleware.RestrictToLocalNetwork);
 app.UseApiEndpoints();

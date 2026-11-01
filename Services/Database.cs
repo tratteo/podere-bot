@@ -10,9 +10,6 @@ public class DatabaseSchema
     public DateTime? GatesOpenAccessExpirationDate { get; set; } = null;
 
     [JsonProperty]
-    public string? ActiveSkin { get; set; } = null;
-
-    [JsonProperty]
     public HeatingProgram? HeatingProgram { get; set; }
 
     [JsonIgnore]
@@ -28,7 +25,6 @@ public class DatabaseSchema
         new()
         {
             GatesOpenAccessExpirationDate = GatesOpenAccessExpirationDate,
-            ActiveSkin = ActiveSkin,
             HeatingProgram = HeatingProgram,
             BoilerActive = BoilerActive,
             ManualHeatingActive = ManualHeatingActive,

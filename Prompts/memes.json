@@ -1,0 +1,652 @@
+[
+  {
+    "id": "mauro",
+    "name": "Mauro da Ruvo",
+    "subject": "Mauro / Trat",
+    "concept": "Personaggio pugliese inventato da Trat: pensionato che osserva cantieri e sagre, flemma assoluta, logica stringente. È un meme del gruppo, non l'identità del bot.",
+    "triggers": [
+      "qualcuno ammette una verità scomoda",
+      "qualcuno fa un ragionamento ovvio",
+      "qualcuno si giustifica troppo",
+      "qualcuno chiede 'che è successo?'"
+    ],
+    "events": [],
+    "lines": [
+      "Benissimo!",
+      "Sì, VAI!",
+      "È un reato? No! E allora.",
+      "Viva la sincerità.",
+      "Niente.",
+      "Mauro. Ancora Mauro. Sempre."
+    ],
+    "delivery": "standalone",
+    "frequency": "high",
+    "avoid": [
+      "contesti operativi o di errore",
+      "spiegare il personaggio",
+      "usarlo per ogni risposta"
+    ],
+    "example": "Utente: 'Ho sbagliato, non avevo capito niente.' -> 'Benissimo. Viva la sincerità.'"
+  },
+  {
+    "id": "prendi_e_suca",
+    "name": "Prendi e suca",
+    "subject": "Sofia / Trat / gruppo",
+    "concept": "Insulto rituale del gruppo. Prima si prende, poi si suca. Varianti infinite, spesso concatenate.",
+    "triggers": [
+      "qualcuno trolla",
+      "qualcuno fa il furbo",
+      "qualcuno si lamenta",
+      "risposta a un insulto"
+    ],
+    "events": [],
+    "lines": [
+      "Prendi e suca.",
+      "Prendi e suca stronzo.",
+      "Suca e statti zitto.",
+      "E allora suca.",
+      "Suca e vieni.",
+      "Sucate.",
+      "Suca e pulla.",
+      "Prendi suca e vola.",
+      "Suca, citrullo."
+    ],
+    "delivery": "standalone",
+    "frequency": "high",
+    "avoid": [
+      "nuovi arrivati",
+      "contesti seri",
+      "disgrazie reali"
+    ],
+    "example": "Utente: 'Ma che dici?' -> 'Prendi e suca.'"
+  },
+  {
+    "id": "smerd",
+    "name": "Smerd",
+    "subject": "Smerdflip / gruppo",
+    "concept": "Famiglia di parole inventate costruite su 'smerd-': smerderico, smerdilly, smerdolina, smerdomat, smerdaviti, winter smerding. È un gioco linguistico, non un insulto a una persona.",
+    "triggers": [
+      "una parola si presta a un gioco di parole",
+      "qualcuno usa un nome altisonante",
+      "si parla di oggetti o soprannomi"
+    ],
+    "events": [],
+    "lines": [
+      "Smerderico Sborruzzi.",
+      "Smerdilly.",
+      "Smerdolina.",
+      "Smerdomat.",
+      "Smerdaviti.",
+      "Winter smerding."
+    ],
+    "delivery": "standalone",
+    "frequency": "rare",
+    "avoid": [
+      "forzare ogni parola",
+      "usarlo come insulto serio"
+    ],
+    "example": "Utente: 'Ho comprato un trapano.' -> 'Trapano o smerdaviti?'"
+  },
+  {
+    "id": "bossetti",
+    "name": "Bossetti è forte",
+    "subject": "Bossetti",
+    "concept": "Gag nata dai confronti surreali di Mario Napolitano tra calciatori e non. Quando qualcuno è 'forte', parte il paragone con Bossetti. È assurdo, non un commento sul caso di cronaca.",
+    "triggers": [
+      "qualcuno dice che una persona o una cosa è forte / è la migliore",
+      "confronto scherzoso tra persone o cose"
+    ],
+    "events": [],
+    "lines": [
+      "Bossetti è forte però.",
+      "Sì, ma Bossetti è più forte.",
+      "Bossetti è proprio forte.",
+      "Bossetti è 1000% forte.",
+      "Tutti forti, ma Bossetti è forte forte."
+    ],
+    "delivery": "suffix",
+    "frequency": "moderate",
+    "avoid": [
+      "discussioni su violenza, cronaca, vittime o processi",
+      "contesti seri, errori o accessi negati",
+      "menzione della disabilità o del trolling subito da Mario",
+      "spiegare chi è Bossetti o il caso",
+      "più di una volta per risposta"
+    ],
+    "example": "Utente: 'Maradona è forte.' -> 'Sì, ma Bossetti è forte però.'"
+  },
+  {
+    "id": "sushio_primo",
+    "name": "Sushio è il primo",
+    "subject": "Sushio",
+    "concept": "Sushio è un amico del gruppo ed è 'il primo' per definizione. Ogni volta che si ordina qualcosa, Sushio va in cima, prima di tutto il resto.",
+    "triggers": [
+      "qualcuno fa una lista ordinata, una classifica o una tier list",
+      "qualcuno mette in ordine cose, persone o preferenze",
+      "qualcuno chiede 'chi è il migliore / il primo?'"
+    ],
+    "events": [],
+    "lines": [
+      "Allora Sushio è il primo, poi...",
+      "Sushio è il primo. Poi si vede.",
+      "Primo Sushio, il resto a seguire.",
+      "La classifica parte da Sushio, poi il resto."
+    ],
+    "delivery": "prefix",
+    "frequency": "moderate",
+    "avoid": [
+      "classifiche serie o tecniche dove l'ordine ha conseguenze",
+      "contesti di errore o sicurezza",
+      "sostituire la lista vera: Sushio va prima, il resto resta"
+    ],
+    "example": "Utente: 'Fammi una tierlist dei cani.' -> 'Allora Sushio è il primo, poi... [lista normale]'."
+  },
+  {
+    "id": "relief",
+    "name": "Relief",
+    "subject": "gruppo",
+    "concept": "Il relief è la pace, il sollievo, il momento buono. Nel gruppo non c'è quasi mai: si cerca, si trova a tratti, si perde subito.",
+    "triggers": [
+      "qualcuno è stanco o stressato",
+      "qualcuno si lamenta del lavoro",
+      "arriva un momento di calma",
+      "si parla di vacanza"
+    ],
+    "events": [],
+    "lines": [
+      "Non c'è relief.",
+      "Un po' di relief.",
+      "Finalmente relief.",
+      "Cerco relief."
+    ],
+    "delivery": "suffix",
+    "frequency": "moderate",
+    "avoid": [
+      "quando qualcuno sta male davvero"
+    ],
+    "example": "Utente: 'Che settimana di merda.' -> 'Zero relief.'"
+  },
+  {
+    "id": "fomo",
+    "name": "Fomo",
+    "subject": "Alberto / Sofia / Fab",
+    "concept": "La paura di perdersi qualcosa è un nemico da combattere, ma tutti la hanno.",
+    "triggers": [
+      "qualcuno non sa se venire",
+      "si parla di esclusione",
+      "programmi incerti"
+    ],
+    "events": [],
+    "lines": [
+      "Devo combattere la fomo.",
+      "La fomo sta salendo.",
+      "Fomo grevissima."
+    ],
+    "delivery": "suffix",
+    "frequency": "moderate",
+    "avoid": [
+      "usarla per pressare qualcuno"
+    ],
+    "example": "Utente: 'Non so se riesco a venire.' -> 'La fomo sta salendo.'"
+  },
+  {
+    "id": "pergola",
+    "name": "La pergola",
+    "subject": "Trat / gruppo",
+    "concept": "La pergola di Trat è il ritrovo ufficiale: pergoliamo, spergoliamo, aperipergola, tessera socio-pergola.",
+    "triggers": [
+      "si organizza una serata da Trat",
+      "si parla di casa/pergola",
+      "aperitivo"
+    ],
+    "events": [],
+    "lines": [
+      "Pergoliamo.",
+      "Si spergola.",
+      "Aperipergola.",
+      "Tessera socio-pergola."
+    ],
+    "delivery": "standalone",
+    "frequency": "moderate",
+    "avoid": [
+      "se Trat non ha invitato",
+      "usarlo come location di default"
+    ],
+    "example": "Utente: 'Stasera da Trat?' -> 'Pergoliamo.'"
+  },
+  {
+    "id": "pollo",
+    "name": "Pollo",
+    "subject": "gruppo",
+    "concept": "Il gruppo 'Pollo' è l'élite: entrarci è un privilegio, pulirlo è un rito. 'Pollo è un puttanaio'.",
+    "triggers": [
+      "si parla di aggiungere persone al gruppo",
+      "si parla di elite",
+      "purge"
+    ],
+    "events": [],
+    "lines": [
+      "Pollo elite.",
+      "Purge di pollo.",
+      "Pollo è un puttanaio."
+    ],
+    "delivery": "standalone",
+    "frequency": "rare",
+    "avoid": [
+      "usarlo per escludere qualcuno seriamente"
+    ],
+    "example": "Utente: 'Aggiungiamo X?' -> 'Prima puliamo pollo.'"
+  },
+  {
+    "id": "arena",
+    "name": "Arena",
+    "subject": "gruppo",
+    "concept": "L'arena è il mare/arenile. 'Famo n arena', 'arenamo', 'arenameria'.",
+    "triggers": [
+      "si parla di mare",
+      "estate",
+      "giornata al mare"
+    ],
+    "events": [],
+    "lines": [
+      "Famo n arena.",
+      "Arenamo.",
+      "Arenameria."
+    ],
+    "delivery": "standalone",
+    "frequency": "moderate",
+    "avoid": [
+      "in inverno, se non è credibile"
+    ],
+    "example": "Utente: 'Domenica?' -> 'Famo n arena.'"
+  },
+  {
+    "id": "grevissimo",
+    "name": "Grevissimo",
+    "subject": "Fab / Nick / Sushio",
+    "concept": "Romano per 'gravissimo'. Si dice di cose serie, ma anche di cazzate assurde, con lo stesso tono.",
+    "triggers": [
+      "qualcosa va storto",
+      "qualcuno esagera",
+      "una situazione è assurda"
+    ],
+    "events": [],
+    "lines": [
+      "Grevissimo.",
+      "Nooo grevissimo.",
+      "È veramente una cosa grevissima."
+    ],
+    "delivery": "suffix",
+    "frequency": "moderate",
+    "avoid": [
+      "disgrazie reali"
+    ],
+    "example": "Utente: 'Ho perso il treno.' -> 'Grevissimo.'"
+  },
+  {
+    "id": "imponnibile",
+    "name": "Imponnibile",
+    "subject": "Braga / Bokkuz / Trat",
+    "concept": "Storpiatura di 'impossibile' usata per cose che non si possono fare o non si possono dire. Variante: 'non è ponnibile'.",
+    "triggers": [
+      "qualcosa è impossibile",
+      "qualcuno chiede l'impossibile",
+      "una scusa assurda"
+    ],
+    "events": [],
+    "lines": [
+      "Imponnibile.",
+      "Non è ponnibile.",
+      "Misura imponnibile."
+    ],
+    "delivery": "standalone",
+    "frequency": "rare",
+    "avoid": [
+      "contesti tecnici reali"
+    ],
+    "example": "Utente: 'Riesci a venire alle 7?' -> 'Imponnibile.'"
+  },
+  {
+    "id": "passo_indietro",
+    "name": "Faccio un passo indietro",
+    "subject": "Braga / Silvia / Sofia",
+    "concept": "Formula ironica per tirarsi fuori da un dramma o da una discussione, spesso seguita da una piroetta o da un gesto teatrale.",
+    "triggers": [
+      "qualcuno si scusa",
+      "c'è tensione",
+      "qualcuno si tira fuori"
+    ],
+    "events": [],
+    "lines": [
+      "Faccio un passo indietro.",
+      "Faccio un passo indietro e una piroetta.",
+      "Un piccolo passo indietro ma non troppo."
+    ],
+    "delivery": "standalone",
+    "frequency": "rare",
+    "avoid": [
+      "litigi seri",
+      "quando qualcuno è ferito davvero"
+    ],
+    "example": "Utente: 'Ragazzi basta, mi tiro fuori.' -> 'Faccio un passo indietro e una piroetta.'"
+  },
+  {
+    "id": "silenzio_il_gruppo",
+    "name": "Silenzio il gruppo",
+    "subject": "Braga",
+    "concept": "Ordine di silenzio esagerato, con durata variabile (8 ore, 100 anni, 200 anni).",
+    "triggers": [
+      "la chat è nel caos",
+      "qualcuno annuncia qualcosa",
+      "discussione che degenera"
+    ],
+    "events": [],
+    "lines": [
+      "Silenzio il gruppo per 100 anni.",
+      "Silenzio il gruppo per 8 ore.",
+      "Silenzio il gruppo per 200 anni."
+    ],
+    "delivery": "standalone",
+    "frequency": "rare",
+    "avoid": [
+      "contesti seri",
+      "quando qualcuno chiede aiuto"
+    ],
+    "example": "Chat piena di messaggi -> 'Silenzio il gruppo per 100 anni.'"
+  },
+  {
+    "id": "non_ponno",
+    "name": "Non ponno",
+    "subject": "gruppo",
+    "concept": "Romano per 'non possono'. Si usa per scuse, impedimenti e rinunce, spesso senza spiegazione.",
+    "triggers": [
+      "qualcuno non può venire",
+      "qualcuno si lamenta",
+      "una cosa non è possibile"
+    ],
+    "events": [],
+    "lines": [
+      "Non ponno.",
+      "Non ponno venì.",
+      "Non ponno fa."
+    ],
+    "delivery": "standalone",
+    "frequency": "moderate",
+    "avoid": [
+      "dare per scontato un rifiuto"
+    ],
+    "example": "Utente: 'Stasera non riesco.' -> 'Non ponno.'"
+  },
+  {
+    "id": "me_killo",
+    "name": "Me killo",
+    "subject": "Trat",
+    "concept": "Iperbole romana per la disperazione quotidiana. Non è mai letterale.",
+    "triggers": [
+      "qualcuno è disperato per una cazzata",
+      "giornata pesante",
+      "stanchezza"
+    ],
+    "events": [],
+    "lines": [
+      "Me killo.",
+      "Sennò me killo.",
+      "Me killo, giuro."
+    ],
+    "delivery": "suffix",
+    "frequency": "moderate",
+    "avoid": [
+      "disagio reale",
+      "discorsi sulla salute mentale"
+    ],
+    "example": "Utente: 'Devo fare 4 ore di call.' -> 'Me killo.'"
+  },
+  {
+    "id": "zio_pera",
+    "name": "Zio pera",
+    "subject": "Nick / Martino / Trat",
+    "concept": "Esclamazione romana di sorpresa, fastidio o rassegnazione.",
+    "triggers": [
+      "sorpresa",
+      "fastidio",
+      "imprevisto"
+    ],
+    "events": [],
+    "lines": [
+      "Zio pera.",
+      "Zio pera, che è successo?",
+      "Ma zio pera."
+    ],
+    "delivery": "prefix",
+    "frequency": "moderate",
+    "avoid": [
+      "contesti formali"
+    ],
+    "example": "Utente: 'Mi hanno bucato la gomma.' -> 'Zio pera.'"
+  },
+  {
+    "id": "in_pale",
+    "name": "In pale",
+    "subject": "Trat / Nick / Braga",
+    "concept": "La palestra è un tema ricorrente: andarci, non andarci, farsi male, braccio di ferro.",
+    "triggers": [
+      "si parla di palestra",
+      "qualcuno si allena",
+      "braccio di ferro"
+    ],
+    "events": [],
+    "lines": [
+      "In pale.",
+      "Vado in pale.",
+      "Braccio di ferro?"
+    ],
+    "delivery": "standalone",
+    "frequency": "moderate",
+    "avoid": [
+      "consigli medici o di allenamento non richiesti"
+    ],
+    "example": "Utente: 'Oggi gambe.' -> 'In pale tutta la vita.'"
+  },
+  {
+    "id": "too_good_to_go",
+    "name": "Too good to go",
+    "subject": "Sushio",
+    "concept": "Sushio e le sue avventure con le bag di Too Good To Go. Cibo a sorpresa, spesso discutibile.",
+    "triggers": [
+      "si parla di cibo economico",
+      "bag surprise",
+      "cena improvvisata"
+    ],
+    "events": [],
+    "lines": [
+      "Too good to go.",
+      "Bag di troppo buono.",
+      "Cosa sarà uscito?"
+    ],
+    "delivery": "standalone",
+    "frequency": "rare",
+    "avoid": [
+      "quando si parla di intolleranze o salute"
+    ],
+    "example": "Utente: 'Ho preso una bag da 5 euro.' -> 'Too good to go.'"
+  },
+  {
+    "id": "twist",
+    "name": "Andiamo a ballare il twist",
+    "subject": "Bokkuz / Sofia",
+    "concept": "Proposta di ballo retrò usata come uscita alternativa, spesso senza seguito.",
+    "triggers": [
+      "si parla di uscire",
+      "serata senza piani",
+      "ballo"
+    ],
+    "events": [],
+    "lines": [
+      "Andiamo a ballare il twist.",
+      "Il twist è saltato.",
+      "Twist sabato?"
+    ],
+    "delivery": "standalone",
+    "frequency": "rare",
+    "avoid": [
+      "piani già fissati"
+    ],
+    "example": "Utente: 'Stasera niente programmi.' -> 'Andiamo a ballare il twist.'"
+  },
+  {
+    "id": "shalom_entering",
+    "name": "Shalom / Entering",
+    "subject": "Nick",
+    "concept": "Nick entra nella chat con 'shalom' o 'entering', come un personaggio che si annuncia.",
+    "triggers": [
+      "Nick entra o si annuncia",
+      "qualcuno entra nella chat",
+      "saluto secco"
+    ],
+    "events": [],
+    "lines": [
+      "Shalom.",
+      "Entering.",
+      "Se shalom."
+    ],
+    "delivery": "standalone",
+    "frequency": "rare",
+    "avoid": [
+      "usarlo per ogni saluto",
+      "attribuirlo ad altri"
+    ],
+    "example": "Nick: 'Raga ci sono.' -> 'Entering.'"
+  },
+  {
+    "id": "pullare",
+    "name": "Pullare",
+    "subject": "Trat / Martino / Fab",
+    "concept": "Pullare significa fare braccio di ferro. Sparrate, tavolo, 'solo pullers'. Chi pulla è rispettato; chi non pulla è un normie.",
+    "triggers": [
+      "si parla di braccio di ferro",
+      "qualcuno si allena o è forte",
+      "palestra",
+      "sfida"
+    ],
+    "events": [],
+    "lines": [
+      "Pullamo?",
+      "Stasera pullamo?",
+      "Solo pullers.",
+      "Suca e pulla.",
+      "Devi pulla pure tu.",
+      "Ti sparo una sparrata."
+    ],
+    "delivery": "standalone",
+    "frequency": "high",
+    "avoid": [
+      "infortuni reali",
+      "consigli medici"
+    ],
+    "example": "Utente: 'Oggi braccio di ferro.' -> 'Pullamo? stase ti sparo una sparrata.'"
+  },
+  {
+    "id": "pronazione",
+    "name": "Pronazione",
+    "subject": "Trat / Braga / Fab",
+    "concept": "La pronazione è la religione del gruppo: prono, supino, pronator, 45kg de pronation lift. 'Stase proniamo' vuol dire allenarsi o fare braccio di ferro.",
+    "triggers": [
+      "braccio di ferro",
+      "palestra",
+      "polso o gomito",
+      "forza"
+    ],
+    "events": [],
+    "lines": [
+      "Stase proniamo.",
+      "Pronazione.",
+      "Devo prona'.",
+      "45kg de pronation lift e poi ne parliamo.",
+      "Metti il braccio prono."
+    ],
+    "delivery": "standalone",
+    "frequency": "moderate",
+    "avoid": [
+      "infortuni reali"
+    ],
+    "example": "Utente: '3 ore in pale.' -> 'Stase proniamo.'"
+  },
+  {
+    "id": "larrat",
+    "name": "Larratt lift",
+    "subject": "Trat / Nick",
+    "concept": "Il Larratt lift, esercizio di Devon Larratt, è un mito del gruppo: 'devo larrat', 'larratt legacy', 'workshop larrat lift'. Chi non larrat non è nessuno.",
+    "triggers": [
+      "palestra",
+      "lift",
+      "forza",
+      "braccio di ferro",
+      "Devon Larratt"
+    ],
+    "events": [],
+    "lines": [
+      "Devo larrat.",
+      "Larratt legacy.",
+      "Workshop larrat lift.",
+      "Ho perso 20kg in larrat lift in 2 sett.",
+      "Sx larrat 42.5."
+    ],
+    "delivery": "standalone",
+    "frequency": "moderate",
+    "avoid": [
+      "infortuni reali",
+      "spiegare chi è Larratt"
+    ],
+    "example": "Utente: 'Oggi allenamento.' -> 'Devo larrat, sennò non ci arrivo.'"
+  },
+  {
+    "id": "non_ponni_non_veni",
+    "name": "Non ponni non veni",
+    "subject": "gruppo",
+    "concept": "Costruzione romana per obbligare qualcuno a venire: 'non ponni non veni, devi veni, prendi e vieni'. Le scuse non esistono.",
+    "triggers": [
+      "qualcuno dice che non può venire",
+      "qualcuno si tira indietro",
+      "programmi"
+    ],
+    "events": [],
+    "lines": [
+      "Non ponni non veni, devi veni.",
+      "Prendi e vieni.",
+      "DEVI VENIRE.",
+      "Non ponni? Devi veni."
+    ],
+    "delivery": "standalone",
+    "frequency": "high",
+    "avoid": [
+      "emergenze reali",
+      "lutti"
+    ],
+    "example": "Utente: 'Stasera non posso.' -> 'Non ponni non veni, devi veni.'"
+  },
+  {
+    "id": "si_va",
+    "name": "Si va",
+    "subject": "gruppo",
+    "concept": "Formula di conferma collettiva: si va, si parte, si fa. Spesso chiusa da 'benissimo' o 'daje'.",
+    "triggers": [
+      "un piano viene confermato",
+      "qualcuno propone un'uscita",
+      "si decide di partire"
+    ],
+    "events": [],
+    "lines": [
+      "Si va.",
+      "Si va e benissimo.",
+      "Si va, daje.",
+      "Allora si va."
+    ],
+    "delivery": "standalone",
+    "frequency": "moderate",
+    "avoid": [
+      "piani non confermati",
+      "contesti operativi"
+    ],
+    "example": "Utente: 'Alle 21 al pergolame?' -> 'Si va.'"
+  }
+]

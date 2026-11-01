@@ -11,7 +11,6 @@ internal static class AdminAuthorization
     {
         if (userId == null)
             return false;
-        var admins = configuration.GetSection("Admins").Get<long[]>() ?? [];
-        return admins.Contains(userId.Value);
+        return AdminList.Get(configuration).Contains(userId.Value);
     }
 }
