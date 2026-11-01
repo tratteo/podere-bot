@@ -177,13 +177,33 @@ internal class HeatingCommand(
         var nextInterval = db.Data.HeatingProgram?.GetNextInterval();
         if (callbackData == "delete")
         {
+            var confirmKbd = new InlineKeyboardMarkup()
+                .AddButton("✅ Rimuovi", EncodeCallbackQueryData("confirmdelete"))
+                .AddButton("❌ Annulla", EncodeCallbackQueryData("cancel"));
+            await Arguments.Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "⚠️ <b>Rimuovere la programmazione?</b>\nLa caldaia smetterà di seguire un orario fino a un nuovo programma.",
+                parseMode: ParseMode.Html,
+                replyMarkup: confirmKbd,
+                disableNotification: true
+            );
+            await Arguments.Client.AnswerCallbackQuery(update.CallbackQuery!.Id);
+            return;
+        }
+        else if (callbackData == "confirmdelete")
+        {
             db.Edit(d =>
             {
                 d.HeatingProgram = null;
             });
             if (currentInterval != null)
                 heatingDriver.SwitchHeating(false);
-            await Arguments.Client.SendMessage(Arguments.Message.Chat.Id, $"🟢 Ho rimosso la programmazione", disableNotification: true);
+            await Arguments.Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "✅ <b>Programmazione rimossa.</b>",
+                parseMode: ParseMode.Html,
+                disableNotification: true
+            );
         }
         else if (callbackData == "off")
         {

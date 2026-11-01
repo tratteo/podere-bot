@@ -13,6 +13,7 @@ internal abstract class AbstractOpenGateCommand(
     IConfiguration configuration,
     ILogger<AbstractOpenGateCommand> logger,
     UserDirectory users,
+    GateAccessService gateAccess,
     GateId gateId
 ) : Command(logger, configuration, users)
 {
@@ -32,7 +33,7 @@ internal abstract class AbstractOpenGateCommand(
         }
 
         var expiration = db.Data.GatesOpenAccessExpirationDate;
-        if (expiration == null || DateTime.Now >= expiration)
+        if (!GateAccessPolicy.IsOpen(expiration, DateTime.Now))
         {
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
@@ -79,6 +80,19 @@ internal abstract class AbstractOpenGateCommand(
 
         if (callbackData == "y")
         {
+            var senderId = Arguments.Message.From!.Id;
+            if (!gateAccess.TryRegisterOpening(senderId, out var retryAfter))
+            {
+                var minutes = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalMinutes));
+                await Arguments.Client.SendMessage(
+                    Arguments.Message.Chat.Id,
+                    $"Hai aperto il cancello troppe volte. Riprova tra {minutes} {(minutes == 1 ? "minuto" : "minuti")}.",
+                    disableNotification: true
+                );
+                await DetachEvents();
+                return;
+            }
+
             await Arguments.Client.SendChatAction(Arguments.Message.Chat.Id, ChatAction.Typing);
             await gateDriver.Open(gateId);
             await Arguments.Client.SendMessage(
@@ -86,14 +100,19 @@ internal abstract class AbstractOpenGateCommand(
                 $"Ho aperto il cancello {GateName} 🐱",
                 disableNotification: true
             );
-            if (Arguments.Message.From != null && !users.CanControlGates(Arguments.Message.From.Id))
+            if (!users.CanControlGates(senderId) && Arguments.Message.From != null)
             {
                 var name = Arguments.Message.From.FirstName;
                 if (!string.IsNullOrEmpty(Arguments.Message.From.LastName))
                 {
                     name += $" {Arguments.Message.From.LastName}";
                 }
-                await Arguments.Client.NotifyOwners($"🔑 <b>{name}</b> ha aperto il cancello {GateName}", users, logger);
+                await Arguments.Client.NotifyTopic(
+                    NotificationTopic.Gates,
+                    $"🔑 <b>{name}</b> ha aperto il cancello {GateName}",
+                    users,
+                    logger
+                );
             }
         }
 

@@ -12,7 +12,9 @@ internal class StatusCommand(
     ILogger<StartCommand> logger,
     IConfiguration configuration,
     UsageTracker usageTracker,
-    UserDirectory users
+    UserDirectory users,
+    ITemperatureDriver temperatureDriver,
+    HealthService healthService
 ) : Command(logger, configuration, users)
 {
     private static readonly CultureInfo Culture = CultureInfo.GetCultureInfo("it-IT");
@@ -33,6 +35,12 @@ internal class StatusCommand(
         sb.AppendLine();
         sb.AppendLine("<b>Sistema</b>");
         sb.AppendLine($"<pre>{BuildSystemBlock(process, uptime)}</pre>");
+        sb.AppendLine();
+        sb.AppendLine("<b>Sensori</b>");
+        sb.AppendLine($"<pre>{await BuildSensorsBlockAsync()}</pre>");
+        sb.AppendLine();
+        sb.AppendLine("<b>Salute</b>");
+        sb.AppendLine($"<pre>{BuildHealthBlock(healthService.Check())}</pre>");
         sb.AppendLine();
         sb.AppendLine($"<b>OpenCode Go · ultimi {UsageDays} giorni</b>");
 
@@ -80,6 +88,69 @@ internal class StatusCommand(
             sb.Append(label.PadRight(width)).Append("  ").Append(value);
         }
         return sb.ToString();
+    }
+
+    private async Task<string> BuildSensorsBlockAsync()
+    {
+        var rows = new List<(string Label, string Value)>();
+        var probe = await temperatureDriver.ProbeLocalTemperature();
+        rows.Add(
+            (
+                "Locale",
+                probe.Temperature.HasValue ? $"{probe.Temperature.Value.ToString("0.0", Culture)} \u00b0C ({probe.Status})" : probe.Status.ToString()
+            )
+        );
+
+        foreach (var reading in temperatureDriver.GetExternalTemperatureReadings())
+        {
+            var age = DateTime.UtcNow - reading.Timestamp;
+            rows.Add((reading.Location, $"{reading.Temperature.ToString("0.0", Culture)} \u00b0C ({FormatAge(age)})"));
+        }
+
+        if (rows.Count == 1 && !probe.Temperature.HasValue)
+            return "Nessun sensore operativo.";
+
+        return BuildAlignedBlock(rows);
+    }
+
+    private static string BuildHealthBlock(HealthReport report)
+    {
+        var rows = new List<(string Label, string Value)>
+        {
+            ("Telegram", report.TelegramOk ? "ok" : "non connesso"),
+            ("Database", report.DatabaseOk ? "scrivibile" : "non scrivibile"),
+            (
+                "Throttled",
+                report.Throttled ?? "non disponibile"
+            ),
+        };
+
+        if (report.CpuTemperatureCelsius is double cpu)
+            rows.Add(("CPU", $"{cpu.ToString("0.0", Culture)} \u00b0C"));
+
+        return BuildAlignedBlock(rows);
+    }
+
+    private static string BuildAlignedBlock(List<(string Label, string Value)> rows)
+    {
+        var width = rows.Max(r => r.Label.Length);
+        var sb = new StringBuilder();
+        foreach (var (label, value) in rows)
+        {
+            if (sb.Length > 0)
+                sb.Append('\n');
+            sb.Append(label.PadRight(width)).Append("  ").Append(value);
+        }
+        return sb.ToString();
+    }
+
+    private static string FormatAge(TimeSpan age)
+    {
+        if (age.TotalMinutes < 1)
+            return "adesso";
+        if (age.TotalHours < 1)
+            return $"{(int)age.TotalMinutes} min fa";
+        return $"{(int)age.TotalHours} h fa";
     }
 
     private static string BuildBudgetBlock(double cost, double budget, double percent, long calls)

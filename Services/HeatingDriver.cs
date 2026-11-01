@@ -8,8 +8,7 @@ internal class HeatingDriver(
     IConfiguration configuration,
     ITemperatureDriver temperatureReader,
     BotHostedService bot,
-    Database db,
-    UserDirectory users
+    Database db
 )
 {
 
@@ -34,14 +33,14 @@ internal class HeatingDriver(
         {
             if (temperatureUnavailableNotified)
             {
-                _ = bot.Client.NotifyOwners("✅ Temperatura host tornata disponbile!", users);
+                _ = bot.NotifyTopicAsync(NotificationTopic.Technical, "Sensore locale tornato disponibile.");
                 temperatureUnavailableNotified = false;
             }
             temperatures.Add((float)localTemperature);
         }
         else if (!temperatureUnavailableNotified)
         {
-            _ = bot.Client.NotifyOwners("⚠️ Temperatura host non disponibile!", users);
+            _ = bot.NotifyTopicAsync(NotificationTopic.Technical, "Sensore locale non disponibile.");
             temperatureUnavailableNotified = true;
         }
         if (temperatures.Count > 0)

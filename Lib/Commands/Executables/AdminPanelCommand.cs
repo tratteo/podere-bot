@@ -25,6 +25,7 @@ internal class AdminPanelCommand(
         User,
         Remove,
         Add,
+        ConfirmEntitlement,
     }
 
     private const int RequestUsersId = 1;
@@ -33,6 +34,7 @@ internal class AdminPanelCommand(
     private readonly PendingInputRegistry pendingInputs = pendingInputs;
     private Screen screen = Screen.Panel;
     private long? selectedId;
+    private string? pendingEntitlement;
     private string notice = string.Empty;
     private Message? panel;
     private Message? pickerPrompt;
@@ -94,6 +96,9 @@ internal class AdminPanelCommand(
             case Screen.Add:
                 text = BuildAddText();
                 keyboard = BuildAddKeyboard();
+                break;
+            case Screen.ConfirmEntitlement:
+                (text, keyboard) = await BuildConfirmEntitlementAsync(selectedId ?? 0);
                 break;
             default:
                 (text, keyboard) = await BuildPanelAsync();
@@ -171,6 +176,28 @@ internal class AdminPanelCommand(
             kbd.AddButton(ToggleButton(topic, user.IsSubscribed(topic)), EncodeCallbackQueryData($"tt:{id}:{topic}")).AddNewRow();
         kbd.AddButton("🗑️ Rimuovi utente", EncodeCallbackQueryData($"ask:{id}")).AddNewRow();
         kbd.AddButton("↩️ Indietro", EncodeCallbackQueryData("back"));
+        return (sb.ToString().TrimEnd(), kbd);
+    }
+
+    private async Task<(string text, InlineKeyboardMarkup keyboard)> BuildConfirmEntitlementAsync(long id)
+    {
+        var user = users.Find(id);
+        if (user == null)
+        {
+            notice = "🟡 Questo utente non esiste più.";
+            screen = Screen.Panel;
+            return await BuildPanelAsync();
+        }
+
+        var name = await ResolveNameAsync(user);
+        var sb = new StringBuilder();
+        sb.AppendLine($"⚠️ Rimuovere <code>{pendingEntitlement}</code> da {UserLink(id, name)}?");
+        sb.AppendLine("L'utente perde subito i permessi collegati.");
+        AppendNotice(sb);
+
+        var kbd = new InlineKeyboardMarkup();
+        kbd.AddButton("✅ Rimuovi", EncodeCallbackQueryData($"ce:{id}")).AddNewRow();
+        kbd.AddButton("❌ Annulla", EncodeCallbackQueryData($"u:{id}"));
         return (sb.ToString().TrimEnd(), kbd);
     }
 
@@ -260,6 +287,7 @@ internal class AdminPanelCommand(
                 return;
             case "u":
                 selectedId = long.Parse(parts[1], CultureInfo.InvariantCulture);
+                pendingEntitlement = null;
                 screen = Screen.User;
                 break;
             case "ask":
@@ -273,7 +301,26 @@ internal class AdminPanelCommand(
             case "te":
                 if (long.TryParse(parts[1], CultureInfo.InvariantCulture, out var entId) && parts.Length > 2)
                 {
+                    var target = users.Find(entId);
+                    var normalized = Entitlement.Normalize(parts[2]);
+                    if (target != null && normalized != null && target.Entitlements.Contains(normalized))
+                    {
+                        selectedId = entId;
+                        pendingEntitlement = normalized;
+                        screen = Screen.ConfirmEntitlement;
+                        await RenderAsync();
+                        return;
+                    }
                     await ToggleEntitlementAsync(entId, parts[2]);
+                    return;
+                }
+                break;
+            case "ce":
+                if (pendingEntitlement != null && selectedId is long confirmId)
+                {
+                    var entitlement = pendingEntitlement;
+                    pendingEntitlement = null;
+                    await ToggleEntitlementAsync(confirmId, entitlement);
                     return;
                 }
                 break;
@@ -468,6 +515,7 @@ internal class AdminPanelCommand(
         }
 
         notice = granted ? $"🟢 <code>{normalized}</code> rimosso." : $"🟢 <code>{normalized}</code> aggiunto.";
+        screen = Screen.User;
         await RenderAsync();
     }
 

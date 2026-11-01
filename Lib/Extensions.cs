@@ -45,14 +45,15 @@ public static class Extensions
             logger?.LogError("error notifying users {e}", ex);
         }
     }
-    internal static Task NotifyOwners(
+    internal static Task NotifyTopic(
         this TelegramBotClient client,
+        string topic,
         string message,
         UserDirectory users,
         ILogger? logger = null
     )
     {
-        var ids = users.AdminIds();
+        var ids = users.Subscribers(topic);
         return ids.Length == 0 ? Task.CompletedTask : client.NotifyUsers(message, [.. ids], logger);
     }
 

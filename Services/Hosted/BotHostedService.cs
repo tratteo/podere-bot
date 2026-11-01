@@ -22,6 +22,10 @@ internal class BotHostedService : IHostedService
     private readonly List<BotCommand> publicCommands;
     private readonly HashSet<long> adminScopedChats = [];
     private readonly object adminScopedChatsLock = new();
+    private readonly TimeSpan heartbeatInterval;
+    private readonly TimeSpan heartbeatTimeout;
+    private Timer? heartbeat;
+    private DateTime? lastTelegramContactUtc;
 
     public BotHostedService(
         ILogger<BotHostedService> logger,
@@ -36,6 +40,10 @@ internal class BotHostedService : IHostedService
         this.services = services;
         this.pendingInputs = pendingInputs;
         this.users = users;
+        heartbeatInterval = TimeSpan.FromSeconds(
+            Math.Max(30, configuration.GetValue<int?>("Telegram:HeartbeatSeconds") ?? 120)
+        );
+        heartbeatTimeout = heartbeatInterval * 3;
         Client = new TelegramBotClient(configuration.GetValue<string>("TELEGRAM_API_KEY")!, cancellationToken: cancellationToken.Token);
         commandEntries = Assembly.GetExecutingAssembly().GetCommands();
         allCommands = commandEntries.ConvertAll(c => new BotCommand() { Command = c.metadata.Key, Description = c.metadata.Description });
@@ -56,7 +64,9 @@ internal class BotHostedService : IHostedService
         {
             await TrySetAdminCommandsScope(adminId, cancellationToken);
         }
-        await Client.NotifyOwners("Presente 😼", users, logger);
+        lastTelegramContactUtc = DateTime.UtcNow;
+        heartbeat = new Timer(_ => _ = PingAsync(), null, heartbeatInterval, heartbeatInterval);
+        await NotifyTopicAsync(NotificationTopic.Technical, "PodereBot online.");
         Client.OnMessage += OnMessage;
         logger.LogInformation("@{u} is running", me.Username);
     }
@@ -95,9 +105,46 @@ internal class BotHostedService : IHostedService
         }
     }
 
+    internal async Task NotifyTopicAsync(string topic, string message)
+    {
+        var ids = users.Subscribers(topic);
+        if (ids.Length == 0)
+        {
+            logger.LogTrace("no subscribers for topic {t}", topic);
+            return;
+        }
+        await NotifyUsersAsync(ids, message);
+    }
+
+    internal async Task NotifyUsersAsync(IEnumerable<long> ids, string message)
+    {
+        var list = ids.Distinct().ToList();
+        if (list.Count == 0)
+            return;
+        await Client.NotifyUsers(message, list, logger);
+    }
+
+    public DateTime? LastTelegramContactUtc => lastTelegramContactUtc;
+
+    public bool IsTelegramHealthy =>
+        lastTelegramContactUtc.HasValue && DateTime.UtcNow - lastTelegramContactUtc.Value < heartbeatTimeout;
+
+    private async Task PingAsync()
+    {
+        try
+        {
+            await Client.GetMe();
+            lastTelegramContactUtc = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("telegram heartbeat failed: {m}", ex.Message);
+        }
+    }
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        await Client.NotifyOwners("Torno a dormire 🌙", users, logger);
+        await NotifyTopicAsync(NotificationTopic.Technical, "PodereBot offline.");
+        heartbeat?.Dispose();
         this.cancellationToken.Cancel();
         await Task.CompletedTask;
     }

@@ -1,4 +1,4 @@
-﻿using PodereBot.Lib.Commands.Abstract;
+using PodereBot.Lib.Commands.Abstract;
 using PodereBot.Services;
 
 namespace PodereBot.Lib.Commands;
@@ -9,8 +9,9 @@ internal class OpenAutomaticGateCommand(
     Database db,
     IConfiguration configuration,
     ILogger<OpenAutomaticGateCommand> logger,
-    UserDirectory users
-) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, GateId.automatic)
+    UserDirectory users,
+    GateAccessService gateAccess
+) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, gateAccess, GateId.automatic)
 {
     protected override string GateName => "automatico";
 }

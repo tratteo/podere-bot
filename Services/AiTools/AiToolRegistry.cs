@@ -28,6 +28,7 @@ internal sealed class AiToolRegistry
         HeatingDriver heatingDriver,
         BotHostedService bot,
         UserDirectory users,
+        GateAccessService gateAccess,
         ILogger<AiToolRegistry> logger
     )
     {
@@ -71,6 +72,11 @@ internal sealed class AiToolRegistry
                 {
                     if (!AdminAuthorization.TryAuthorizeGateOpening(users, db))
                         return "I cancelli sono bloccati al momento. Solo gli amministratori possono aprirli.";
+                    var gateUserId = AiChatService.GetCurrentUserId();
+                    if (gateUserId == null)
+                        return "Impossibile identificare l'utente.";
+                    if (!gateAccess.TryRegisterOpening(gateUserId.Value, out var retryAfter))
+                        return $"Hai aperto il cancello troppe volte. Riprova tra {(int)Math.Ceiling(retryAfter.TotalMinutes)} minuti.";
                     gateDriver.Open(GateId.automatic).GetAwaiter().GetResult();
                     return "Cancello automatico aperto.";
                 },
@@ -84,6 +90,11 @@ internal sealed class AiToolRegistry
                 {
                     if (!AdminAuthorization.TryAuthorizeGateOpening(users, db))
                         return "I cancelli sono bloccati al momento. Solo gli amministratori possono aprirli.";
+                    var gateUserId = AiChatService.GetCurrentUserId();
+                    if (gateUserId == null)
+                        return "Impossibile identificare l'utente.";
+                    if (!gateAccess.TryRegisterOpening(gateUserId.Value, out var retryAfter))
+                        return $"Hai aperto il cancello troppe volte. Riprova tra {(int)Math.Ceiling(retryAfter.TotalMinutes)} minuti.";
                     gateDriver.Open(GateId.pedestrian).GetAwaiter().GetResult();
                     return "Cancello pedonale aperto.";
                 },
@@ -139,10 +150,12 @@ internal sealed class AiToolRegistry
 
         functions.Add(
             AIFunctionFactory.Create(
-                () =>
+                (bool confirm) =>
                 {
                     if (!AdminAuthorization.TryAuthorize(users))
                         return "Non autorizzato: servono permessi admin.";
+                    if (!confirm)
+                        return "Operazione distruttiva: chiedi conferma esplicita all'utente e richiama lo strumento con confirm=true.";
                     db.Edit(d => d.GatesOpenAccessExpirationDate = null);
                     return "Cancelli bloccati. Solo gli amministratori possono utilizzarli.";
                 },
@@ -261,10 +274,12 @@ internal sealed class AiToolRegistry
 
         functions.Add(
             AIFunctionFactory.Create(
-                () =>
+                (bool confirm) =>
                 {
                     if (!AdminAuthorization.TryAuthorize(users))
                         return "Non autorizzato: servono permessi admin.";
+                    if (!confirm)
+                        return "Operazione distruttiva: chiedi conferma esplicita all'utente e richiama lo strumento con confirm=true.";
                     db.Edit(d => d.HeatingProgram = null);
                     heatingDriver.SwitchHeating(false);
                     return "Programma di riscaldamento rimosso.";

@@ -1,4 +1,6 @@
 ﻿using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Server;
 using System.ClientModel;
@@ -47,8 +49,12 @@ builder.Services.AddSingleton<PendingInputRegistry>();
 builder.Services.AddSingleton<UserDirectory>();
 builder.Services.AddSingleton<ModelPricing>();
 builder.Services.AddSingleton<UsageTracker>();
+builder.Services.AddSingleton<GateAccessService>();
+builder.Services.AddSingleton<HealthService>();
 
 builder.Services.AddHostedService<HeatingProgramDaemon>();
+builder.Services.AddHostedService<HeatingMonitorDaemon>();
+builder.Services.AddHostedService<GateAccessExpiryDaemon>();
 
 builder.Services.AddSingleton<BotHostedService>();
 builder.Services.AddHostedService(p => p.GetRequiredService<BotHostedService>());
@@ -103,6 +109,33 @@ var app = builder.Build();
 app.Services.GetRequiredService<ModelPricing>();
 
 app.Use(Middleware.RestrictToLocalNetwork);
+
+var apiToken = builder.Configuration["Api:Token"];
+if (!string.IsNullOrWhiteSpace(apiToken))
+{
+    var expected = Encoding.UTF8.GetBytes(apiToken);
+    app.Use(
+        async (context, next) =>
+        {
+            var path = context.Request.Path;
+            if (path.StartsWithSegments("/api") || path.StartsWithSegments("/mcp"))
+            {
+                var provided = context.Request.Headers["X-Api-Token"].ToString();
+                var candidate = Encoding.UTF8.GetBytes(provided);
+                if (
+                    candidate.Length != expected.Length
+                    || !CryptographicOperations.FixedTimeEquals(candidate, expected)
+                )
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
+            }
+            await next();
+        }
+    );
+}
+
 app.UseApiEndpoints();
 app.MapMcp("/mcp");
 app.UseSwagger();

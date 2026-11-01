@@ -1,4 +1,4 @@
-﻿using PodereBot.Services;
+using PodereBot.Services;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -29,7 +29,7 @@ internal class ManageGatesCommand(
             }
         }
         kbd.AddNewRow();
-        kbd.AddButton("Blocca", EncodeCallbackQueryData(0));
+        kbd.AddButton("Blocca", EncodeCallbackQueryData("block"));
         kbd.AddNewRow();
         kbd.AddButton("Chiudi", EncodeCallbackQueryData(-1));
         var status =
@@ -49,29 +49,54 @@ internal class ManageGatesCommand(
 
     protected override async Task OnCallback(Update update, string callbackData)
     {
+        await Arguments.Client.AnswerCallbackQuery(update.CallbackQuery!.Id);
         var date = DateTime.Now;
-        int hours = int.Parse(callbackData);
-        if (hours == 0)
+
+        if (callbackData == "block")
+        {
+            var confirmKbd = new InlineKeyboardMarkup()
+                .AddButton("✅ Blocca", EncodeCallbackQueryData("confirmblock"))
+                .AddButton("❌ Annulla", EncodeCallbackQueryData("cancel"));
+            await Arguments.Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "⚠️ <b>Bloccare i cancelli?</b>\nGli utenti non amministratori non potranno più aprirli.",
+                parseMode: ParseMode.Html,
+                replyMarkup: confirmKbd,
+                disableNotification: true
+            );
+            return;
+        }
+
+        if (callbackData == "confirmblock")
         {
             database.Edit((data) => data.GatesOpenAccessExpirationDate = null);
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
-                $"I cancelli sono bloccati 😼, solo gli amminstratori possono utilizzarli",
+                "I cancelli sono <b>bloccati</b>, solo gli amministratori possono utilizzarli.",
+                parseMode: ParseMode.Html,
                 disableNotification: true
             );
         }
-        else if (hours > 0)
+        else if (callbackData == "cancel")
+        {
+            await Arguments.Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "Operazione annullata.",
+                disableNotification: true
+            );
+        }
+        else if (int.TryParse(callbackData, out var hours) && hours > 0)
         {
             date = date.AddHours(hours);
             database.Edit((data) => data.GatesOpenAccessExpirationDate = date);
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
-                $"I cancelli sono sbloccati fino al <b>{date} 🙀</b>",
+                $"I cancelli sono sbloccati fino al <b>{date}</b>",
                 parseMode: ParseMode.Html,
                 disableNotification: true
             );
         }
-        await Arguments.Client.AnswerCallbackQuery(update.CallbackQuery!.Id);
+
         await DetachEvents();
     }
 }

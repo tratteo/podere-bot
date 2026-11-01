@@ -87,4 +87,30 @@ Every `.env` key overrides the same key in `appsettings.json`.
 
 Hardware defaults to embedded GPIO. Set `SerialPort` only if the pins are driven over a serial adapter.
 
+### Heating and alerts
+
+```json
+"Heating": {
+  "Antifreeze": { "Enabled": true, "ThresholdCelsius": 5.0 },
+  "BoilerAlert": { "MaxContinuousHours": 4.0 },
+  "TemperatureBand": { "MinCelsius": 5.0, "MaxCelsius": 30.0 }
+}
+```
+
+Antifreeze wins over the program, over its suspension and over a manual switch-off. Notifications go to the subscribers of the `technical`, `heating` and `gates` topics; admins receive all of them.
+
+### Gate access
+
+```json
+"Gates": { "RateLimit": { "MaxOpenings": 3, "WindowMinutes": 10 } }
+```
+
+The limit applies only to users without `admin` or `gate_controller`. When a shared access window expires, the users who used the gates receive a notice.
+
+### API
+
+`GET /api/status`, `/api/temperatures`, `/api/heating`, `/api/gates`, `/api/health`; `POST /api/temperature`. `/api/health` answers 503 when the Telegram connection or the database is unhealthy, and it is what the systemd watchdog checks.
+
+Set `API_TOKEN=...` in `.env` to require the `X-Api-Token` header on every `/api/*` and `/mcp` request. With no token, the local-network restriction is the only guard.
+
 Users are the `Users` seed in `appsettings.json` merged with the gitignored `users.json`, minus the ids under `Removed`. Each entry has `Id`, optional `Name`, `Entitlements` and `Topics`. The entitlements are `admin` (implies every other entitlement and every topic) and `gate_controller` (opens the gates at any time, without being an admin). The topics are `technical`, `heating` and `gates`. A user with no entry, or with no entitlement, is a normal user. `/adminpanel` (admin only) lists them as Telegram contacts and manages entitlements and topics; changes persist across `patch.sh`. A legacy `admins.json` is migrated once and then deleted. Admin commands are hidden from non-admins.

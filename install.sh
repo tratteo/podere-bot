@@ -186,14 +186,14 @@ WantedBy=multi-user.target
 EOF
 
     echo - writing watchdog .service files
-    cat > /etc/systemd/system/poderebot-wd.service <<'EOF'
+    cat > /etc/systemd/system/poderebot-wd.service <<EOF
 [Unit]
 Description=Telegram Podere bot watchdog service
 After=poderebot.service
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'curl -m 5 -f http://localhost:5050/api/status || systemctl restart poderebot.service'
+ExecStart=/bin/sh -c 'R="$ROOT"; T=\$(sed -n "s/^API_TOKEN=//p" "\$R/.env" 2>/dev/null | head -n1); if [ -n "\$T" ]; then curl -m 5 -f -H "X-Api-Token: \$T" http://localhost:5050/api/health || systemctl restart poderebot.service; else curl -m 5 -f http://localhost:5050/api/health || systemctl restart poderebot.service; fi'
 
 [Install]
 WantedBy=multi-user.target

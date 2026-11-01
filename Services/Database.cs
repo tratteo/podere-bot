@@ -18,6 +18,9 @@ public class DatabaseSchema
     [JsonIgnore]
     public bool ManualHeatingActive { get; set; }
 
+    [JsonPropertyName("GateAccessUsers")]
+    public List<long> GateAccessUsers { get; set; } = [];
+
     public DatabaseSchema Clone() =>
         new()
         {
@@ -25,6 +28,7 @@ public class DatabaseSchema
             HeatingProgram = HeatingProgram,
             BoilerActive = BoilerActive,
             ManualHeatingActive = ManualHeatingActive,
+            GateAccessUsers = [.. GateAccessUsers],
         };
 }
 
@@ -85,6 +89,24 @@ internal class Database
         {
             modifier?.Invoke(data);
             Save();
+        }
+    }
+
+    /// <summary>Checks that the directory holding the database accepts writes.</summary>
+    public bool TryProbeWritable()
+    {
+        var directory = Path.GetDirectoryName(DB_PATH) ?? AppContext.BaseDirectory;
+        var probe = Path.Join(directory, ".db-probe");
+        try
+        {
+            File.WriteAllText(probe, DateTime.UtcNow.ToString("O"));
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("database write probe failed: {e}", ex);
+            return false;
         }
     }
 }

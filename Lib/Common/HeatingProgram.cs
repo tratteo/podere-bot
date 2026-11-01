@@ -46,6 +46,15 @@ public class HeatingProgram()
 
     public static bool TryBuild(IEnumerable<HeatingInterval> intervals, out HeatingProgram? program)
     {
+        foreach (var interval in intervals)
+        {
+            if (interval.FromTimestamp >= interval.ToTimestamp)
+            {
+                program = null;
+                return false;
+            }
+        }
+
         if (intervals.Count() > 1)
         {
             for (int i = 0; i < intervals.Count(); i++)

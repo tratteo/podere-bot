@@ -10,8 +10,10 @@ internal class HeatingProgramDaemon(
 {
     private readonly TimeSpan daemonPollInterval = TimeSpan.FromSeconds(configuration.GetValue<int?>("Heating:PollIntervalSeconds") ?? 10);
     private readonly TimeSpan thresholdTolerance = TimeSpan.FromSeconds(configuration.GetValue<int?>("Heating:ToleranceSeconds") ?? 600);
+    private readonly AntifreezeOptions antifreeze = OptionsReader.ReadAntifreeze(configuration);
     private TimeSpan actionDelay = TimeSpan.Zero;
     private HeatingInterval? lastInterval;
+    private bool antifreezeActive;
 
     public void ToggleHeating(bool enabled)
     {
@@ -26,12 +28,34 @@ internal class HeatingProgramDaemon(
         {
             try
             {
+                var temperature = await heatingDriver.GetOperationalTemperature(stoppingToken);
+
+                // Antifreeze takes precedence over the schedule and over its suspension.
+                if (temperature is float measured)
+                {
+                    if (!antifreezeActive && HeatingPolicies.AntifreezeShouldEngage(measured, antifreeze))
+                    {
+                        antifreezeActive = true;
+                        logger.LogInformation("antifreeze engaged at {t} C, boiler forced on", measured);
+                        ToggleHeating(true);
+                    }
+                    else if (antifreezeActive && HeatingPolicies.AntifreezeShouldRelease(measured, antifreeze))
+                    {
+                        antifreezeActive = false;
+                        logger.LogInformation("antifreeze released at {t} C", measured);
+                        if (db.Data.HeatingProgram == null || db.Data.HeatingProgram.IsSuspended)
+                            ToggleHeating(false);
+                    }
+                }
+
+                if (antifreezeActive)
+                    continue;
+
                 // If there is no program, quit
                 if (db.Data.HeatingProgram == null || db.Data.HeatingProgram.IsSuspended)
                     continue;
 
                 // If temperature is not available, quit
-                var temperature = await heatingDriver.GetOperationalTemperature(stoppingToken);
                 if (temperature == null)
                 {
                     logger.LogTrace("no temperature data");

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Release build and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore PodereBot.csproj
+
+      - name: Build (Release)
+        run: dotnet build PodereBot.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/PodereBot.Tests/PodereBot.Tests.csproj -c Release

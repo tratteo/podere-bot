@@ -1,4 +1,4 @@
-﻿using PodereBot.Lib.Commands.Abstract;
+using PodereBot.Lib.Commands.Abstract;
 using PodereBot.Services;
 
 namespace PodereBot.Lib.Commands;
@@ -9,8 +9,9 @@ internal class OpenPedestrianGateCommand(
     Database db,
     IConfiguration configuration,
     ILogger<OpenPedestrianGateCommand> logger,
-    UserDirectory users
-) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, GateId.pedestrian)
+    UserDirectory users,
+    GateAccessService gateAccess
+) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, gateAccess, GateId.pedestrian)
 {
     protected override string GateName => "pedonale";
 }
