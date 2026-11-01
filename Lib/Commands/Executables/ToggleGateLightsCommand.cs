@@ -8,8 +8,9 @@ internal class ToggleGatesLightCommand(
     GateDriver gateDriver,
     Database db,
     IConfiguration configuration,
-    ILogger<ToggleGatesLightCommand> logger
-) : Command(logger, configuration)
+    ILogger<ToggleGatesLightCommand> logger,
+    UserDirectory users
+) : Command(logger, configuration, users)
 {
     private readonly GateDriver gateDriver = gateDriver;
     private readonly Database db = db;

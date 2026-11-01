@@ -14,12 +14,21 @@
     <DefineConstants>EMBEDDED_GPIO</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="PodereBot.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Remove="appsettings.json" />
     <!-- Local output folders must not be picked up as content and republished into themselves -->
     <Content Remove="build/**" />
     <None Remove="build/**" />
     <Content Remove="buildruntimes/**" />
     <None Remove="buildruntimes/**" />
+    <!-- The test project lives inside this tree and must not be compiled into the app -->
+    <Compile Remove="tests/**" />
+    <Content Remove="tests/**" />
+    <None Remove="tests/**" />
+    <EmbeddedResource Remove="tests/**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -39,13 +48,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CryptoClients.Net" Version="4.6.0" />
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.6.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.6.0" />
     <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.3.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.4" />
     <PackageReference Include="System.Device.Gpio" Version="4.1.0" />
     <PackageReference Include="System.IO.Ports" Version="10.0.3" />

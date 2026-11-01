@@ -5,7 +5,7 @@ project.lock.json
 *.pyc
 nupkg/
 .env
-admins.json
+users.json
 usage.json
 run.sh
 patch.sh

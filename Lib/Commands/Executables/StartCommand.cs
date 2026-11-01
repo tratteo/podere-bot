@@ -1,10 +1,12 @@
+using PodereBot.Services;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
 
 namespace PodereBot.Lib.Commands;
 
 [CommandMetadata(Key = "/start", Description = "❓")]
-internal class StartCommand(ILogger<StartCommand> logger, IConfiguration configuration) : Command(logger, configuration)
+internal class StartCommand(ILogger<StartCommand> logger, IConfiguration configuration, UserDirectory users)
+    : Command(logger, configuration, users)
 {
     protected override async Task ExecuteInternal()
     {

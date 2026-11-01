@@ -1,8 +1,6 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using PodereBot.Services;
 using PodereBot.Services.Hosted;
 using Telegram.Bot;
@@ -16,22 +14,21 @@ namespace PodereBot.Lib.Commands;
 internal class AdminPanelCommand(
     ILogger<AdminPanelCommand> logger,
     IConfiguration configuration,
-    IHostEnvironment environment,
     BotHostedService bot,
-    PendingInputRegistry pendingInputs
-) : Command(logger, configuration)
+    PendingInputRegistry pendingInputs,
+    UserDirectory users
+) : Command(logger, configuration, users)
 {
     private enum Screen
     {
         Panel,
+        User,
         Remove,
         Add,
     }
 
     private const int RequestUsersId = 1;
-    private static readonly object configLock = new();
     private readonly ILogger<AdminPanelCommand> logger = logger;
-    private readonly IHostEnvironment environment = environment;
     private readonly BotHostedService bot = bot;
     private readonly PendingInputRegistry pendingInputs = pendingInputs;
     private Screen screen = Screen.Panel;
@@ -88,8 +85,11 @@ internal class AdminPanelCommand(
         InlineKeyboardMarkup keyboard;
         switch (screen)
         {
+            case Screen.User:
+                (text, keyboard) = await BuildUserAsync(selectedId ?? 0);
+                break;
             case Screen.Remove:
-                (text, keyboard) = await BuildRemoveAsync();
+                (text, keyboard) = await BuildRemoveAsync(selectedId ?? 0);
                 break;
             case Screen.Add:
                 text = BuildAddText();
@@ -112,55 +112,97 @@ internal class AdminPanelCommand(
 
     private async Task<(string text, InlineKeyboardMarkup keyboard)> BuildPanelAsync()
     {
-        var admins = AdminList.Get(configuration);
-        var storedNames = GetStoredNames();
-        var names = await ResolveNamesAsync(admins, storedNames);
-        var sb = new StringBuilder("👑 <b>Pannello amministratori</b>\n\n");
-        if (admins.Length == 0)
+        var all = users.All();
+        var names = await ResolveNamesAsync(all);
+        var sb = new StringBuilder("👑 <b>Pannello utenti</b>\n\n");
+        if (all.Count == 0)
         {
-            sb.AppendLine("Nessun amministratore.");
+            sb.AppendLine("Nessun utente configurato.");
         }
         else
         {
-            foreach (var id in admins)
-                sb.AppendLine($"• {UserLink(id, names[id])} <code>{id}</code>");
+            foreach (var user in all)
+            {
+                sb.AppendLine($"• {UserLink(user.Id, names[user.Id])} <code>{user.Id}</code>");
+                var badges = BuildBadges(user);
+                if (badges.Length > 0)
+                    sb.AppendLine($"  {badges}");
+            }
         }
         sb.AppendLine();
-        sb.AppendLine($"Totale: <b>{admins.Length}</b>");
+        sb.AppendLine($"Totale: <b>{all.Count}</b> utenti, <b>{all.Count(u => u.IsAdmin)}</b> admin");
         AppendNotice(sb);
 
         var kbd = new InlineKeyboardMarkup();
-        foreach (var id in admins)
-            kbd.AddButton($"➖ {Shorten(names[id])}", EncodeCallbackQueryData($"ask:{id}")).AddNewRow();
-        kbd.AddButton("➕ Aggiungi amministratore", EncodeCallbackQueryData("add")).AddNewRow();
+        foreach (var user in all)
+            kbd.AddButton($"✏️ {Shorten(names[user.Id])}", EncodeCallbackQueryData($"u:{user.Id}")).AddNewRow();
+        kbd.AddButton("➕ Aggiungi utente", EncodeCallbackQueryData("add")).AddNewRow();
         kbd.AddButton("✖️ Chiudi", EncodeCallbackQueryData("close"));
         return (sb.ToString().TrimEnd(), kbd);
     }
 
-    private async Task<(string text, InlineKeyboardMarkup keyboard)> BuildRemoveAsync()
+    private async Task<(string text, InlineKeyboardMarkup keyboard)> BuildUserAsync(long id)
     {
-        var id = selectedId ?? 0;
-        var key = id.ToString(CultureInfo.InvariantCulture);
-        var storedNames = GetStoredNames();
-        var name =
-            storedNames.TryGetValue(key, out var stored) && !string.IsNullOrWhiteSpace(stored)
-                ? stored
-                : await ResolveNameAsync(id);
+        var user = users.Find(id);
+        if (user == null)
+        {
+            notice = "🟡 Questo utente non esiste più.";
+            return await BuildPanelAsync();
+        }
+
+        var name = await ResolveNameAsync(user);
         var sb = new StringBuilder();
-        sb.AppendLine($"Rimuovere {UserLink(id, name)} dagli amministratori?");
-        sb.AppendLine($"<code>{id}</code>");
+        sb.AppendLine($"👤 {UserLink(user.Id, name)}");
+        sb.AppendLine($"<code>{user.Id}</code>");
+        sb.AppendLine();
+        sb.AppendLine("<b>Permessi</b>");
+        sb.AppendLine($"• {ToggleLabel("admin", "👑", user.IsAdmin)}");
+        sb.AppendLine($"• {ToggleLabel("gate_controller", "🔑", user.Entitlements.Contains(Entitlement.GateController))}");
+        sb.AppendLine();
+        sb.AppendLine("<b>Topic</b>");
+        foreach (var topic in NotificationTopic.All)
+            sb.AppendLine($"• {ToggleLabel(topic, "#", user.IsSubscribed(topic))}");
         AppendNotice(sb);
 
         var kbd = new InlineKeyboardMarkup();
-        kbd.AddButton("✅ Rimuovi", EncodeCallbackQueryData("rm")).AddNewRow();
-        kbd.AddButton("↩️ Annulla", EncodeCallbackQueryData("back"));
+        foreach (var entitlement in Entitlement.All)
+            kbd.AddButton(ToggleButton(entitlement, user.Entitlements.Contains(entitlement)), EncodeCallbackQueryData($"te:{id}:{entitlement}")).AddNewRow();
+        foreach (var topic in NotificationTopic.All)
+            kbd.AddButton(ToggleButton(topic, user.IsSubscribed(topic)), EncodeCallbackQueryData($"tt:{id}:{topic}")).AddNewRow();
+        kbd.AddButton("🗑️ Rimuovi utente", EncodeCallbackQueryData($"ask:{id}")).AddNewRow();
+        kbd.AddButton("↩️ Indietro", EncodeCallbackQueryData("back"));
+        return (sb.ToString().TrimEnd(), kbd);
+    }
+
+    private async Task<(string text, InlineKeyboardMarkup keyboard)> BuildRemoveAsync(long id)
+    {
+        var user = users.Find(id);
+        if (user == null)
+        {
+            notice = "🟡 Questo utente non esiste più.";
+            return await BuildPanelAsync();
+        }
+
+        var name = await ResolveNameAsync(user);
+        var sb = new StringBuilder();
+        sb.AppendLine($"Rimuovere {UserLink(user.Id, name)}?");
+        sb.AppendLine($"<code>{user.Id}</code>");
+        if (user.IsAdmin && users.AdminIds().Length <= 1)
+            sb.AppendLine();
+        sb.AppendLine("Perde tutti i permessi e le iscrizioni ai topic.");
+        AppendNotice(sb);
+
+        var kbd = new InlineKeyboardMarkup();
+        kbd.AddButton("✅ Rimuovi", EncodeCallbackQueryData($"rm:{id}")).AddNewRow();
+        kbd.AddButton("↩️ Annulla", EncodeCallbackQueryData($"u:{id}"));
         return (sb.ToString().TrimEnd(), kbd);
     }
 
     private string BuildAddText()
     {
-        var sb = new StringBuilder("➕ <b>Nuovo amministratore</b>\n\n");
+        var sb = new StringBuilder("➕ <b>Nuovo utente</b>\n\n");
         sb.AppendLine("Mandami l'ID Telegram in chat, oppure usa il pulsante qui sotto per sceglierlo dai contatti.");
+        sb.AppendLine("L'utente viene creato senza permessi: li scegli nella schermata successiva.");
         if (pickerPrompt != null)
             sb.AppendLine().AppendLine("<i>Pulsante di selezione inviato qui sotto.</i>");
         AppendNotice(sb);
@@ -172,6 +214,23 @@ internal class AdminPanelCommand(
         var kbd = new InlineKeyboardMarkup();
         kbd.AddButton("✖️ Annulla", EncodeCallbackQueryData("cancelAdd"));
         return kbd;
+    }
+
+    private static string ToggleLabel(string name, string icon, bool active) =>
+        $"{icon} <code>{name}</code> {(active ? "✅" : "➖")}";
+
+    private static string ToggleButton(string name, bool active) => $"{(active ? "✅" : "➖")} {name}";
+
+    private static string BuildBadges(UserEntry user)
+    {
+        var parts = new List<string>();
+        if (user.IsAdmin)
+            parts.Add("👑 admin");
+        if (user.Entitlements.Contains(Entitlement.GateController))
+            parts.Add("🔑 gate_controller");
+        foreach (var topic in user.Topics)
+            parts.Add($"#{topic}");
+        return string.Join(" · ", parts);
     }
 
     private void AppendNotice(StringBuilder sb)
@@ -199,15 +258,34 @@ internal class AdminPanelCommand(
             case "cancelAdd":
                 await LeaveAddAsync("🟡 Aggiunta annullata.");
                 return;
+            case "u":
+                selectedId = long.Parse(parts[1], CultureInfo.InvariantCulture);
+                screen = Screen.User;
+                break;
             case "ask":
                 selectedId = long.Parse(parts[1], CultureInfo.InvariantCulture);
                 screen = Screen.Remove;
                 break;
             case "rm":
-                if (selectedId is long id)
-                    await RemoveAdminAsync(id);
+                if (selectedId is long removeId)
+                    await RemoveUserAsync(removeId);
                 return;
+            case "te":
+                if (long.TryParse(parts[1], CultureInfo.InvariantCulture, out var entId) && parts.Length > 2)
+                {
+                    await ToggleEntitlementAsync(entId, parts[2]);
+                    return;
+                }
+                break;
+            case "tt":
+                if (long.TryParse(parts[1], CultureInfo.InvariantCulture, out var topicId) && parts.Length > 2)
+                {
+                    await ToggleTopicAsync(topicId, parts[2]);
+                    return;
+                }
+                break;
             case "back":
+                selectedId = null;
                 screen = Screen.Panel;
                 break;
         }
@@ -237,7 +315,7 @@ internal class AdminPanelCommand(
             return;
         }
 
-        await AddAdminAsync(id.Value, BuildDisplayName(sharedUser));
+        await AddUserAsync(id.Value, BuildDisplayName(sharedUser));
     }
 
     private async Task EnterAddAsync()
@@ -300,33 +378,189 @@ internal class AdminPanelCommand(
         await RenderAsync();
     }
 
-    private async Task AddAdminAsync(long id, string? displayName)
+    private async Task AddUserAsync(long id, string? displayName)
     {
-        if (AdminList.Get(configuration).Contains(id))
+        if (users.Find(id) != null)
         {
-            await LeaveAddAsync($"🟡 <code>{id}</code> è già amministratore.");
+            await LeaveAddAsync($"🟡 <code>{id}</code> è già configurato.");
             return;
         }
 
-        var key = id.ToString(CultureInfo.InvariantCulture);
-        if (
-            !TryWriteAdmins(
-                runtime => runtime.Add(id),
-                removed => removed.Remove(id),
-                names =>
-                {
-                    if (!string.IsNullOrWhiteSpace(displayName))
-                        names[key] = displayName;
-                },
-                out var error
-            )
-        )
+        try
         {
-            notice = error;
+            users.Upsert(new UserEntry { Id = id, Name = displayName });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("unable to add user {id}: {e}", id, ex);
+            notice = "🔴 Non sono riuscito a salvare la configurazione, guarda i log.";
             await RenderAsync();
             return;
         }
 
+        pendingInputs.Unregister(Arguments.Message.Chat.Id);
+        if (pickerPrompt != null)
+        {
+            try
+            {
+                await Arguments.Client.DeleteMessage(pickerPrompt.Chat.Id, pickerPrompt.Id);
+            }
+            catch (Exception)
+            {
+                // The prompt may already be gone.
+            }
+            pickerPrompt = null;
+        }
+        await Arguments.Client.SendMessage(
+            Arguments.Message.Chat.Id,
+            $"🟢 <code>{id}</code> aggiunto. Scegli ora i permessi.",
+            parseMode: ParseMode.Html,
+            replyMarkup: new ReplyKeyboardRemove(),
+            disableNotification: true
+        );
+
+        selectedId = id;
+        screen = Screen.User;
+        await RenderAsync();
+    }
+
+    private async Task ToggleEntitlementAsync(long id, string entitlement)
+    {
+        var user = users.Find(id);
+        if (user == null)
+        {
+            notice = "🟡 Questo utente non esiste più.";
+            screen = Screen.Panel;
+            await RenderAsync();
+            return;
+        }
+
+        var normalized = Entitlement.Normalize(entitlement);
+        if (normalized == null)
+        {
+            notice = "🔴 Permesso sconosciuto.";
+            await RenderAsync();
+            return;
+        }
+
+        var granted = user.Entitlements.Contains(normalized);
+        if (granted && normalized == Entitlement.Admin && users.AdminIds().Length <= 1)
+        {
+            notice = "🔴 Non posso togliere i poteri all'ultimo amministratore.";
+            await RenderAsync();
+            return;
+        }
+
+        if (granted)
+            user.Entitlements.RemoveAll(e => string.Equals(e, normalized, StringComparison.OrdinalIgnoreCase));
+        else
+            user.Entitlements.Add(normalized);
+
+        if (!TrySave(user))
+            return;
+
+        if (normalized == Entitlement.Admin)
+        {
+            if (granted)
+                await ForgetAdminScopeAsync(id);
+            else
+                await TrySetAdminScopeAsync(id);
+        }
+
+        notice = granted ? $"🟢 <code>{normalized}</code> rimosso." : $"🟢 <code>{normalized}</code> aggiunto.";
+        await RenderAsync();
+    }
+
+    private async Task ToggleTopicAsync(long id, string topic)
+    {
+        var user = users.Find(id);
+        if (user == null)
+        {
+            notice = "🟡 Questo utente non esiste più.";
+            screen = Screen.Panel;
+            await RenderAsync();
+            return;
+        }
+
+        var normalized = NotificationTopic.Normalize(topic);
+        if (normalized == null)
+        {
+            notice = "🔴 Topic sconosciuto.";
+            await RenderAsync();
+            return;
+        }
+
+        var subscribed = user.Topics.Contains(normalized);
+        if (subscribed)
+            user.Topics.RemoveAll(t => string.Equals(t, normalized, StringComparison.OrdinalIgnoreCase));
+        else
+            user.Topics.Add(normalized);
+
+        if (!TrySave(user))
+            return;
+
+        notice = subscribed ? $"🟢 Iscrizione a <code>{normalized}</code> rimossa." : $"🟢 Iscritto a <code>{normalized}</code>.";
+        await RenderAsync();
+    }
+
+    private async Task RemoveUserAsync(long id)
+    {
+        var user = users.Find(id);
+        if (user == null)
+        {
+            notice = "🟡 Questo utente non esiste più.";
+            screen = Screen.Panel;
+            await RenderAsync();
+            return;
+        }
+
+        if (user.IsAdmin && users.AdminIds().Length <= 1)
+        {
+            notice = "🔴 Non posso rimuovere l'ultimo amministratore.";
+            screen = Screen.User;
+            await RenderAsync();
+            return;
+        }
+
+        try
+        {
+            users.Remove(id);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("unable to remove user {id}: {e}", id, ex);
+            notice = "🔴 Non sono riuscito a salvare la configurazione, guarda i log.";
+            screen = Screen.User;
+            await RenderAsync();
+            return;
+        }
+
+        if (user.IsAdmin)
+            await ForgetAdminScopeAsync(id);
+
+        selectedId = null;
+        notice = $"🟢 <code>{id}</code> rimosso.";
+        screen = Screen.Panel;
+        await RenderAsync();
+    }
+
+    private bool TrySave(UserEntry user)
+    {
+        try
+        {
+            users.Upsert(user);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("unable to save user {id}: {e}", user.Id, ex);
+            notice = "🔴 Non sono riuscito a salvare la configurazione, guarda i log.";
+            return false;
+        }
+    }
+
+    private async Task TrySetAdminScopeAsync(long id)
+    {
         try
         {
             await bot.TrySetAdminCommandsScope(id, CancellationToken.None);
@@ -335,42 +569,10 @@ internal class AdminPanelCommand(
         {
             logger.LogWarning("unable to set admin commands for {id}: {m}", id, ex.Message);
         }
-        await LeaveAddAsync($"🟢 <code>{id}</code> aggiunto agli amministratori.");
     }
 
-    private async Task RemoveAdminAsync(long id)
+    private async Task ForgetAdminScopeAsync(long id)
     {
-        var admins = AdminList.Get(configuration);
-        if (!admins.Contains(id))
-        {
-            notice = "🟡 Questo utente non è più amministratore.";
-            screen = Screen.Panel;
-            await RenderAsync();
-            return;
-        }
-        if (admins.Length <= 1)
-        {
-            notice = "🔴 Non posso rimuovere l'ultimo amministratore.";
-            screen = Screen.Panel;
-            await RenderAsync();
-            return;
-        }
-
-        if (
-            !TryWriteAdmins(
-                runtime => runtime.Remove(id),
-                removed => removed.Add(id),
-                names => names.Remove(id.ToString(CultureInfo.InvariantCulture)),
-                out var error
-            )
-        )
-        {
-            notice = error;
-            screen = Screen.Panel;
-            await RenderAsync();
-            return;
-        }
-
         try
         {
             await bot.Client.DeleteMyCommands(scope: new BotCommandScopeChat() { ChatId = id });
@@ -380,106 +582,15 @@ internal class AdminPanelCommand(
             logger.LogWarning("unable to clear admin commands for {id}: {m}", id, ex.Message);
         }
         bot.ForgetAdminCommandsScope(id);
-
-        selectedId = null;
-        notice = $"🟢 <code>{id}</code> rimosso dagli amministratori.";
-        screen = Screen.Panel;
-        await RenderAsync();
     }
 
-    private bool TryWriteAdmins(
-        Action<List<long>> editRuntime,
-        Action<List<long>> editRemoved,
-        Action<Dictionary<string, string>> editNames,
-        out string error
-    )
-    {
-        var path = Path.Join(environment.ContentRootPath, "admins.json");
-        lock (configLock)
-        {
-            try
-            {
-                var runtime = (configuration.GetSection("RuntimeAdmins").Get<long[]>() ?? []).Distinct().ToList();
-                var removed = (configuration.GetSection("RemovedAdmins").Get<long[]>() ?? []).Distinct().ToList();
-                var names = GetStoredNames();
-                editRuntime(runtime);
-                editRemoved(removed);
-                editNames(names);
-
-                var runtimeArray = new JArray();
-                foreach (var id in runtime.Distinct())
-                    runtimeArray.Add(id);
-                var removedArray = new JArray();
-                foreach (var id in removed.Distinct())
-                    removedArray.Add(id);
-                var namesObject = new JObject();
-                foreach (var entry in names.OrderBy(e => e.Key))
-                    namesObject[entry.Key] = entry.Value;
-
-                var root = new JObject
-                {
-                    ["RuntimeAdmins"] = runtimeArray,
-                    ["RemovedAdmins"] = removedArray,
-                    ["AdminNames"] = namesObject,
-                };
-
-                using var writer = new StringWriter() { NewLine = "\n" };
-                using (
-                    var jsonWriter = new JsonTextWriter(writer)
-                    {
-                        Formatting = Formatting.Indented,
-                        Indentation = 2,
-                        CloseOutput = false,
-                    }
-                )
-                {
-                    root.WriteTo(jsonWriter);
-                }
-                writer.WriteLine();
-
-                var tmpPath = $"{path}.tmp";
-                try
-                {
-                    File.WriteAllText(tmpPath, writer.ToString());
-                    File.Move(tmpPath, path, true);
-                }
-                finally
-                {
-                    if (File.Exists(tmpPath))
-                        File.Delete(tmpPath);
-                }
-
-                if (configuration is IConfigurationRoot rootConfiguration)
-                    rootConfiguration.Reload();
-
-                error = string.Empty;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError("unable to update admins at {p}: {e}", path, ex);
-                error = "🔴 Non sono riuscito a salvare la configurazione, guarda i log.";
-                return false;
-            }
-        }
-    }
-
-    private async Task<Dictionary<long, string>> ResolveNamesAsync(IEnumerable<long> ids, Dictionary<string, string> storedNames)
+    private async Task<Dictionary<long, string>> ResolveNamesAsync(IReadOnlyList<UserEntry> entries)
     {
         var names = new Dictionary<long, string>();
-        foreach (var id in ids)
-        {
-            var key = id.ToString(CultureInfo.InvariantCulture);
-            names[id] =
-                storedNames.TryGetValue(key, out var stored) && !string.IsNullOrWhiteSpace(stored)
-                    ? stored
-                    : await ResolveNameAsync(id);
-        }
+        foreach (var entry in entries)
+            names[entry.Id] = await ResolveNameAsync(entry);
         return names;
     }
-
-    private Dictionary<string, string> GetStoredNames() =>
-        configuration.GetSection("AdminNames").Get<Dictionary<string, string>>() ?? new Dictionary<string, string>();
 
     private static string? BuildDisplayName(SharedUser? user)
     {
@@ -491,19 +602,22 @@ internal class AdminPanelCommand(
         return string.IsNullOrWhiteSpace(user.Username) ? null : $"@{user.Username}";
     }
 
-    private async Task<string> ResolveNameAsync(long id)
+    private async Task<string> ResolveNameAsync(UserEntry entry)
     {
+        if (!string.IsNullOrWhiteSpace(entry.Name))
+            return entry.Name;
+
         try
         {
-            var chat = await Arguments.Client.GetChat(id);
+            var chat = await Arguments.Client.GetChat(entry.Id);
             var name = $"{chat.FirstName} {chat.LastName}".Trim();
             if (string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(chat.Username))
                 name = $"@{chat.Username}";
-            return string.IsNullOrWhiteSpace(name) ? id.ToString(CultureInfo.InvariantCulture) : name;
+            return string.IsNullOrWhiteSpace(name) ? entry.Id.ToString(CultureInfo.InvariantCulture) : name;
         }
         catch (Exception)
         {
-            return id.ToString(CultureInfo.InvariantCulture);
+            return entry.Id.ToString(CultureInfo.InvariantCulture);
         }
     }
 

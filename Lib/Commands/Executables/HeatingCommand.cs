@@ -15,8 +15,9 @@ internal class HeatingCommand(
     ILogger<HeatingCommand> logger,
     IConfiguration configuration,
     HeatingDriver heatingDriver,
-    Database db
-) : Command(logger, configuration)
+    Database db,
+    UserDirectory users
+) : Command(logger, configuration, users)
 {
     private readonly System.Timers.Timer refreshTimer = new(TimeSpan.FromSeconds(10));
 

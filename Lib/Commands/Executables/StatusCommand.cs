@@ -8,8 +8,12 @@ using Telegram.Bot.Types.Enums;
 namespace PodereBot.Lib.Commands;
 
 [CommandMetadata(Key = "/status", Description = "Ti mando le statistiche del sistema")]
-internal class StatusCommand(ILogger<StartCommand> logger, IConfiguration configuration, UsageTracker usageTracker)
-    : Command(logger, configuration)
+internal class StatusCommand(
+    ILogger<StartCommand> logger,
+    IConfiguration configuration,
+    UsageTracker usageTracker,
+    UserDirectory users
+) : Command(logger, configuration, users)
 {
     private static readonly CultureInfo Culture = CultureInfo.GetCultureInfo("it-IT");
     private const int UsageDays = 7;

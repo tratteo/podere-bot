@@ -1,15 +1,15 @@
 ﻿using System.Text.Json;
-using Newtonsoft.Json;
+using System.Text.Json.Serialization;
 using PodereBot.Lib.Common;
 
 namespace PodereBot.Services;
 
 public class DatabaseSchema
 {
-    [JsonProperty]
+    [JsonPropertyName("GatesOpenAccessExpirationDate")]
     public DateTime? GatesOpenAccessExpirationDate { get; set; } = null;
 
-    [JsonProperty]
+    [JsonPropertyName("HeatingProgram")]
     public HeatingProgram? HeatingProgram { get; set; }
 
     [JsonIgnore]
@@ -18,9 +18,6 @@ public class DatabaseSchema
     [JsonIgnore]
     public bool ManualHeatingActive { get; set; }
 
-    [JsonProperty]
-    public List<long> TradingAlertsSubscriptions { get; set; } = [];
-
     public DatabaseSchema Clone() =>
         new()
         {
@@ -28,14 +25,16 @@ public class DatabaseSchema
             HeatingProgram = HeatingProgram,
             BoilerActive = BoilerActive,
             ManualHeatingActive = ManualHeatingActive,
-            TradingAlertsSubscriptions = TradingAlertsSubscriptions
         };
 }
 
 internal class Database
 {
     private static readonly string DB_PATH = Path.Join(AppContext.BaseDirectory, "db.json");
+    private static readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true };
+
     private readonly ILogger<Database> logger;
+    private readonly object sync = new();
 
     private readonly DatabaseSchema data;
     public DatabaseSchema Data => data.Clone();
@@ -45,8 +44,16 @@ internal class Database
         this.logger = logger;
         if (File.Exists(DB_PATH))
         {
-            data = JsonConvert.DeserializeObject<DatabaseSchema>(File.ReadAllText(DB_PATH))!;
-            logger.LogDebug("local db found and loaded");
+            try
+            {
+                data = JsonSerializer.Deserialize<DatabaseSchema>(File.ReadAllText(DB_PATH), jsonOptions) ?? new DatabaseSchema();
+                logger.LogDebug("local db found and loaded");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError("unable to read {p}, starting from an empty database: {e}", DB_PATH, ex);
+                data = new DatabaseSchema();
+            }
         }
         else
         {
@@ -57,14 +64,27 @@ internal class Database
 
     private void Save()
     {
-        File.WriteAllTextAsync(DB_PATH, JsonConvert.SerializeObject(data));
-        logger.LogTrace("local db serialized > {p}", DB_PATH);
+        var tmpPath = $"{DB_PATH}.tmp";
+        try
+        {
+            File.WriteAllText(tmpPath, JsonSerializer.Serialize(data, jsonOptions) + "\n");
+            File.Move(tmpPath, DB_PATH, true);
+            logger.LogTrace("local db serialized > {p}", DB_PATH);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("unable to write {p}: {e}", DB_PATH, ex);
+            if (File.Exists(tmpPath))
+                File.Delete(tmpPath);
+        }
     }
 
     public void Edit(Action<DatabaseSchema> modifier)
     {
-        modifier?.Invoke(data);
-
-        Save();
+        lock (sync)
+        {
+            modifier?.Invoke(data);
+            Save();
+        }
     }
 }

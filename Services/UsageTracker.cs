@@ -1,6 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.AI;
-using Newtonsoft.Json;
+using System.Text.Json;
 
 namespace PodereBot.Services;
 
@@ -24,6 +24,7 @@ internal class UsageSummary
 
 internal class UsageTracker
 {
+    private static readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true };
     private static readonly object fileLock = new();
     private readonly ILogger<UsageTracker> logger;
     private readonly ModelPricing pricing;
@@ -102,7 +103,7 @@ internal class UsageTracker
         {
             if (!File.Exists(path))
                 return;
-            var data = JsonConvert.DeserializeObject<Dictionary<string, UsageEntry>>(File.ReadAllText(path));
+            var data = JsonSerializer.Deserialize<Dictionary<string, UsageEntry>>(File.ReadAllText(path));
             if (data == null)
                 return;
             foreach (var (key, entry) in data)
@@ -118,7 +119,7 @@ internal class UsageTracker
     {
         try
         {
-            var json = JsonConvert.SerializeObject(days, Formatting.Indented).Replace("\r\n", "\n") + "\n";
+            var json = JsonSerializer.Serialize(days, jsonOptions) + "\n";
             var tmpPath = $"{path}.tmp";
             try
             {

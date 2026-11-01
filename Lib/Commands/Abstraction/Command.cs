@@ -14,11 +14,12 @@ internal readonly struct CommandArguments
     public readonly bool Admin { get; init; }
 }
 
-internal abstract class Command(ILogger<Command> logger, IConfiguration configuration)
+internal abstract class Command(ILogger<Command> logger, IConfiguration configuration, UserDirectory users)
 {
     protected readonly string instanceId = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
     private readonly ILogger<Command> logger = logger;
     protected readonly IConfiguration configuration = configuration;
+    protected readonly UserDirectory users = users;
     private static readonly string callbackDataSeparator = "♦";
     private readonly List<Message> messagesToDelete = [];
     private readonly List<Message> messagesToCleanupMd = [];
@@ -87,7 +88,7 @@ internal abstract class Command(ILogger<Command> logger, IConfiguration configur
         if (!arguments.Admin)
             return true;
 
-        if (!AdminList.Get(configuration).Contains(arguments.Message.From!.Id))
+        if (!users.IsAdmin(arguments.Message.From!.Id))
         {
             await arguments.Client.SendChatAction(arguments.Message.Chat.Id, ChatAction.ChooseSticker);
             await arguments.Client.SendMessage(arguments.Message.Chat.Id, "Non hai abbastanza poteri canide 🐶", disableNotification: true);

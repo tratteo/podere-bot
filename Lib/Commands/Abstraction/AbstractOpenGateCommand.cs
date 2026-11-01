@@ -12,45 +12,44 @@ internal abstract class AbstractOpenGateCommand(
     Database db,
     IConfiguration configuration,
     ILogger<AbstractOpenGateCommand> logger,
+    UserDirectory users,
     GateId gateId
-) : Command(logger, configuration)
+) : Command(logger, configuration, users)
 {
     private readonly GateDriver gateDriver = gateDriver;
     private readonly Database db = db;
     private readonly GateId gateId = gateId;
-    private readonly long[] adminIds = AdminList.Get(configuration);
     protected abstract string GateName { get; }
+
+    private long SenderId => Arguments.Message.From!.Id;
 
     protected override async Task ExecuteInternal()
     {
-        if (adminIds.Contains(Arguments.Message.From!.Id))
+        if (users.CanControlGates(SenderId))
         {
             await OpenProcedure();
+            return;
         }
-        else
+
+        var expiration = db.Data.GatesOpenAccessExpirationDate;
+        if (expiration == null || DateTime.Now >= expiration)
         {
-            var canOpen = db.Data.GatesOpenAccessExpirationDate != null && DateTime.Now < db.Data.GatesOpenAccessExpirationDate;
-            if (!canOpen)
-            {
-                await Arguments.Client.SendMessage(
-                    Arguments.Message.Chat.Id,
-                    "I cancelli sono bloccati al momento ❌",
-                    disableNotification: true
-                );
-                return;
-            }
-            else
-            {
-                await OpenProcedure();
-            }
+            await Arguments.Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "I cancelli sono bloccati al momento ❌",
+                disableNotification: true
+            );
+            return;
         }
+
+        await OpenProcedure();
     }
 
     private async Task OpenProcedure()
     {
         AttachEvents();
         var msg = new StringBuilder();
-        if (!adminIds.Contains(Arguments.Message.From!.Id))
+        if (!users.CanControlGates(SenderId))
         {
             msg.AppendLine(
                 $"""
@@ -87,14 +86,14 @@ internal abstract class AbstractOpenGateCommand(
                 $"Ho aperto il cancello {GateName} 🐱",
                 disableNotification: true
             );
-            if (Arguments.Message.From != null && !adminIds.Contains(Arguments.Message.From.Id))
+            if (Arguments.Message.From != null && !users.CanControlGates(Arguments.Message.From.Id))
             {
                 var name = Arguments.Message.From.FirstName;
                 if (!string.IsNullOrEmpty(Arguments.Message.From.LastName))
                 {
                     name += $" {Arguments.Message.From.LastName}";
                 }
-                await Arguments.Client.NotifyOwners($"🔑 <b>{name}</b> ha aperto il cancello {GateName}", logger);
+                await Arguments.Client.NotifyOwners($"🔑 <b>{name}</b> ha aperto il cancello {GateName}", users, logger);
             }
         }
 

@@ -1,10 +1,13 @@
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace PodereBot.Lib.Common;
 
 public class HeatingProgram()
 {
     public bool IsSuspended { get; set; } = false;
+
+    [JsonInclude]
     public List<HeatingInterval> Intervals { get; private set; } = [];
 
     private HeatingProgram(IEnumerable<HeatingInterval> intervals)

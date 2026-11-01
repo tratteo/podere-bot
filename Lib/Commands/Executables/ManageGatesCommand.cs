@@ -7,8 +7,12 @@ using Telegram.Bot.Types.ReplyMarkups;
 namespace PodereBot.Lib.Commands;
 
 [CommandMetadata(Key = "/gates", Description = "Abilito o disabilito l'apertura dei cancelli agli utenti 🔐", Admin = true)]
-internal class ManageGatesCommand(ILogger<ManageGatesCommand> logger, Database database, IConfiguration configuration)
-    : Command(logger, configuration)
+internal class ManageGatesCommand(
+    ILogger<ManageGatesCommand> logger,
+    Database database,
+    IConfiguration configuration,
+    UserDirectory users
+) : Command(logger, configuration, users)
 {
     private readonly Database database = database;
 

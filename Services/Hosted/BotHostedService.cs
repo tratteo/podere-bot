@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using PodereBot.Lib;
 using PodereBot.Lib.Commands;
 using Telegram.Bot;
@@ -17,6 +17,7 @@ internal class BotHostedService : IHostedService
     private readonly List<CommandRegistryKey> commandEntries;
     private readonly IConfiguration configuration;
     private readonly PendingInputRegistry pendingInputs;
+    private readonly UserDirectory users;
     private readonly List<BotCommand> allCommands;
     private readonly List<BotCommand> publicCommands;
     private readonly HashSet<long> adminScopedChats = [];
@@ -26,13 +27,15 @@ internal class BotHostedService : IHostedService
         ILogger<BotHostedService> logger,
         IConfiguration configuration,
         IServiceProvider services,
-        PendingInputRegistry pendingInputs
+        PendingInputRegistry pendingInputs,
+        UserDirectory users
     )
     {
         this.logger = logger;
         this.configuration = configuration;
         this.services = services;
         this.pendingInputs = pendingInputs;
+        this.users = users;
         Client = new TelegramBotClient(configuration.GetValue<string>("TELEGRAM_API_KEY")!, cancellationToken: cancellationToken.Token);
         commandEntries = Assembly.GetExecutingAssembly().GetCommands();
         allCommands = commandEntries.ConvertAll(c => new BotCommand() { Command = c.metadata.Key, Description = c.metadata.Description });
@@ -53,12 +56,12 @@ internal class BotHostedService : IHostedService
         {
             await TrySetAdminCommandsScope(adminId, cancellationToken);
         }
-        await Client.NotifyOwners("Presente 😼", logger);
+        await Client.NotifyOwners("Presente 😼", users, logger);
         Client.OnMessage += OnMessage;
         logger.LogInformation("@{u} is running", me.Username);
     }
 
-    private long[] GetAdminIds() => AdminList.Get(configuration);
+    private long[] GetAdminIds() => users.AdminIds();
 
     internal async Task TrySetAdminCommandsScope(long chatId, CancellationToken cancellationToken)
     {
@@ -94,7 +97,7 @@ internal class BotHostedService : IHostedService
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        await Client.NotifyOwners("Torno a dormire 🌙", logger);
+        await Client.NotifyOwners("Torno a dormire 🌙", users, logger);
         this.cancellationToken.Cancel();
         await Task.CompletedTask;
     }

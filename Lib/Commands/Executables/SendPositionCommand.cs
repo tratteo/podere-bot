@@ -1,10 +1,14 @@
-﻿using Telegram.Bot;
+using PodereBot.Services;
+using Telegram.Bot;
 
 namespace PodereBot.Lib.Commands;
 
 [CommandMetadata(Key = "/sendpos", Description = "Ti mando la posizione di casa 📍")]
-internal class SendPositionCommand(ILogger<SendPositionCommand> logger, IConfiguration configuration)
-    : Command(logger, configuration)
+internal class SendPositionCommand(
+    ILogger<SendPositionCommand> logger,
+    IConfiguration configuration,
+    UserDirectory users
+) : Command(logger, configuration, users)
 {
     protected override async Task ExecuteInternal()
     {

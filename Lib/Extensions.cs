@@ -1,9 +1,7 @@
-﻿using System.Reflection;
-using Binance.Net.Enums;
-using CryptoExchange.Net.Attributes;
-using Microsoft.OpenApi;
+using System.Reflection;
 using PodereBot.Lib.Api;
 using PodereBot.Lib.Commands;
+using PodereBot.Services;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -12,16 +10,6 @@ namespace PodereBot.Lib;
 
 public static class Extensions
 {
-    public static string GetMapName(this KlineInterval interval)
-    {
-        var attr = interval.GetAttributeOfType<MapAttribute>();
-        if (attr?.Values.Length > 0)
-        {
-            return attr.Values[0];
-        }
-        return interval.GetDisplayName();
-    }
-
     public static bool IsLocal(this HttpRequest req)
     {
         var connection = req.HttpContext.Connection;
@@ -57,17 +45,15 @@ public static class Extensions
             logger?.LogError("error notifying users {e}", ex);
         }
     }
-    internal static async Task NotifyOwners(this TelegramBotClient client, string message, ILogger? logger = null)
+    internal static Task NotifyOwners(
+        this TelegramBotClient client,
+        string message,
+        UserDirectory users,
+        ILogger? logger = null
+    )
     {
-        try
-        {
-            List<int> ids = [962154266];
-            await Task.WhenAll(ids.ConvertAll(i => client.SendMessage(i, message, parseMode: ParseMode.Html)));
-        }
-        catch (Exception ex)
-        {
-            logger?.LogError("error notifying admins {e}", ex);
-        }
+        var ids = users.AdminIds();
+        return ids.Length == 0 ? Task.CompletedTask : client.NotifyUsers(message, [.. ids], logger);
     }
 
     internal static async Task<Message> CleanupOnDetach(this Task<Message> msgTask, Command command)

@@ -16,7 +16,6 @@ Console.WriteLine("========== Podere Bot ==========\n");
 DotNetEnv.Env.Load();
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://0.0.0.0:5050");
-builder.Configuration.AddJsonFile("admins.json", optional: true, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables();
 builder.Services.Configure<ConsoleLifetimeOptions>(options => options.SuppressStatusMessages = true);
 builder.Services.AddCommands();
@@ -45,14 +44,11 @@ builder.Services.AddSingleton<GateDriver>();
 builder.Services.AddSingleton<HeatingDriver>();
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<PendingInputRegistry>();
+builder.Services.AddSingleton<UserDirectory>();
 builder.Services.AddSingleton<ModelPricing>();
 builder.Services.AddSingleton<UsageTracker>();
 
 builder.Services.AddHostedService<HeatingProgramDaemon>();
-
-// Crypto alerts engine disabled.
-// builder.Services.AddSingleton<CryptoAlertDaemon>();
-// builder.Services.AddHostedService(p => p.GetRequiredService<CryptoAlertDaemon>());
 
 builder.Services.AddSingleton<BotHostedService>();
 builder.Services.AddHostedService(p => p.GetRequiredService<BotHostedService>());
@@ -86,13 +82,21 @@ builder.Services.AddSingleton<AiToolRegistry>();
 builder.Services.AddTransient<AiChatService>();
 
 // ===== MCP Configuration =====
-#pragma warning disable ASP0000 // Intentional: need tool registry for MCP, all deps are singletons
-var earlySp = builder.Services.BuildServiceProvider();
-#pragma warning restore ASP0000
+builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true);
+
+// Tools are resolved from the real container when the server options are first built,
+// so no secondary service provider is needed at startup.
 builder.Services
-    .AddMcpServer()
-    .WithHttpTransport(o => o.Stateless = true)
-    .WithTools(earlySp.GetRequiredService<AiToolRegistry>().AllMcpServerTools);
+    .AddOptions<McpServerOptions>()
+    .Configure<IServiceProvider>(
+        (options, provider) =>
+        {
+            var collection = new McpServerPrimitiveCollection<McpServerTool>();
+            foreach (var tool in provider.GetRequiredService<AiToolRegistry>().AllMcpServerTools)
+                collection.Add(tool);
+            options.ToolCollection = collection;
+        }
+    );
 
 var app = builder.Build();
 

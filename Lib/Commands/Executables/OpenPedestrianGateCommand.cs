@@ -8,8 +8,9 @@ internal class OpenPedestrianGateCommand(
     GateDriver gateDriver,
     Database db,
     IConfiguration configuration,
-    ILogger<OpenPedestrianGateCommand> logger
-) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, GateId.pedestrian)
+    ILogger<OpenPedestrianGateCommand> logger,
+    UserDirectory users
+) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, GateId.pedestrian)
 {
     protected override string GateName => "pedonale";
 }

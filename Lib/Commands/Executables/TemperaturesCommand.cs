@@ -12,8 +12,9 @@ namespace PodereBot.Lib.Commands;
 internal class TemperaturesCommand(
     ILogger<StartCommand> logger,
     IConfiguration configuration,
-    ITemperatureDriver temperatureDriver
-) : Command(logger, configuration)
+    ITemperatureDriver temperatureDriver,
+    UserDirectory users
+) : Command(logger, configuration, users)
 {
     private static readonly CultureInfo Culture = CultureInfo.GetCultureInfo("it-IT");
     private readonly System.Timers.Timer refreshTimer = new(TimeSpan.FromSeconds(5));
