@@ -28,4 +28,4 @@ jobs:
         run: dotnet build PodereBot.csproj -c Release --no-restore
 
       - name: Test
-        run: dotnet test tests/PodereBot.Tests/PodereBot.Tests.csproj -c Release
+        run: dotnet test tests/poderebot.tests/PodereBot.Tests.csproj -c Release

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.AI;
@@ -65,11 +65,11 @@ var endpoint = aiSection["Endpoint"]!;
 var model = aiSection["Model"]!;
 var zenApiKey = builder.Configuration.GetValue<string>("ZEN_API_KEY")!;
 
-var promptPath = Path.Combine(AppContext.BaseDirectory, "Prompts", "system-prompt.md");
+var promptPath = Path.Combine(AppContext.BaseDirectory, "prompts", "system-prompt.md");
 if (File.Exists(promptPath))
 {
     var prompt = File.ReadAllText(promptPath);
-    var memesPath = Path.Combine(AppContext.BaseDirectory, "Prompts", "memes.json");
+    var memesPath = Path.Combine(AppContext.BaseDirectory, "prompts", "memes.json");
     if (File.Exists(memesPath))
         prompt += "\n\n## Catalogo meme (JSON)\n" + File.ReadAllText(memesPath);
     builder.Configuration["AI:SystemPrompt"] = prompt;
