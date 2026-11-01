@@ -140,7 +140,7 @@ echo - cleaning old build output
 rm -rf "$REPO_DIR/build"
 
 echo - building distribution
-as_user dotnet publish -c Release -r linux-arm64 --self-contained false -o "$REPO_DIR/build"
+as_user dotnet publish "$REPO_DIR/PodereBot.csproj" -c Release -r linux-arm64 --self-contained false -o "$REPO_DIR/build"
 
 echo - starting service
 sys start poderebot.service
@@ -159,7 +159,7 @@ if systemctl is-active --quiet poderebot.service 2>/dev/null; then
 fi
 echo - cleaning old build output
 rm -rf "$ROOT/build"
-as_user dotnet publish -c Release -r linux-arm64 --self-contained false -o "$ROOT/build"
+as_user dotnet publish "$ROOT/PodereBot.csproj" -c Release -r linux-arm64 --self-contained false -o "$ROOT/build"
 if [ "$was_running" -eq 1 ]; then
     systemctl start poderebot.service
     was_running=0
