@@ -4,8 +4,8 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <PublishSingleFile>true</PublishSingleFile>
     <Nullable>enable</Nullable>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
     <RestoreSources>
       https://api.nuget.org/v3/index.json;
       https://pkgs.dev.azure.com/tgbots/Telegram.Bot/_packaging/release/nuget/v3/index.json;
@@ -16,6 +16,11 @@
   </PropertyGroup>
   <ItemGroup>
     <None Remove="appsettings.json" />
+    <!-- Local output folders must not be picked up as content and republished into themselves -->
+    <Content Remove="build/**" />
+    <None Remove="build/**" />
+    <Content Remove="buildruntimes/**" />
+    <None Remove="buildruntimes/**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,9 +42,9 @@
   <ItemGroup>
     <PackageReference Include="CryptoClients.Net" Version="4.6.0" />
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.6.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.6.0" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.3.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.4" />

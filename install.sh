@@ -136,8 +136,11 @@ echo - stopping service
 sys stop poderebot.service || true
 trap 'sys start poderebot.service || true' EXIT
 
+echo - cleaning old build output
+rm -rf "$REPO_DIR/build"
+
 echo - building distribution
-as_user dotnet build /p:OutputPath=build
+as_user dotnet publish -c Release -r linux-arm64 --self-contained false -o "$REPO_DIR/build"
 
 echo - starting service
 sys start poderebot.service
@@ -154,7 +157,9 @@ if systemctl is-active --quiet poderebot.service 2>/dev/null; then
     was_running=1
     systemctl stop poderebot.service
 fi
-as_user dotnet build /p:OutputPath=build
+echo - cleaning old build output
+rm -rf "$ROOT/build"
+as_user dotnet publish -c Release -r linux-arm64 --self-contained false -o "$ROOT/build"
 if [ "$was_running" -eq 1 ]; then
     systemctl start poderebot.service
     was_running=0
