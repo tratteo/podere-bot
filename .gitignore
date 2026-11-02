@@ -5,6 +5,7 @@ project.lock.json
 *.pyc
 nupkg/
 .env
+db.json
 users.json
 usage.json
 startup.json
