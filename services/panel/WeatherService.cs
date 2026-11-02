@@ -28,6 +28,9 @@ internal sealed class WeatherService : IDisposable
     private readonly System.Timers.Timer refreshTimer;
     private readonly Uri uri;
     private readonly bool enabled;
+    private readonly TaskCompletionSource<WeatherSnapshot?> firstAttempt = new(
+        TaskCreationOptions.RunContinuationsAsynchronously
+    );
     private WeatherSnapshot? current;
 
     public WeatherService(IConfiguration configuration, ILogger<WeatherService> logger)
@@ -47,13 +50,31 @@ internal sealed class WeatherService : IDisposable
 
         refreshTimer = new System.Timers.Timer(TimeSpan.FromMinutes(options.RefreshMinutes));
         if (!enabled)
+        {
+            firstAttempt.TrySetResult(null);
             return;
+        }
         refreshTimer.Elapsed += async (_, _) => await RefreshAsync();
         refreshTimer.Start();
         _ = RefreshAsync();
     }
 
     public WeatherSnapshot? Current => Volatile.Read(ref current);
+
+    /// <summary>
+    /// The last good snapshot, waiting briefly for the first fetch when the service just started.
+    /// Null when the weather is disabled or the first attempt failed.
+    /// </summary>
+    public async Task<WeatherSnapshot?> GetAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (Current is WeatherSnapshot snapshot)
+            return snapshot;
+        if (firstAttempt.Task.IsCompleted)
+            return firstAttempt.Task.Result;
+
+        await Task.WhenAny(firstAttempt.Task, Task.Delay(timeout, cancellationToken));
+        return Current;
+    }
 
     private async Task RefreshAsync()
     {
@@ -63,14 +84,17 @@ internal sealed class WeatherService : IDisposable
             if (snapshot == null)
             {
                 logger.LogWarning("weather response without current conditions");
+                firstAttempt.TrySetResult(null);
                 return;
             }
             Volatile.Write(ref current, snapshot);
+            firstAttempt.TrySetResult(snapshot);
             logger.LogDebug("weather: {t} °C, code {c}", snapshot.Temperature, snapshot.Code);
         }
         catch (Exception ex)
         {
             logger.LogWarning("unable to fetch the weather: {e}", ex.Message);
+            firstAttempt.TrySetResult(null);
         }
     }
 
