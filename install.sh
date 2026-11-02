@@ -188,7 +188,7 @@ DRY_RUN=0
 log() { echo "$(date -Is) [update] $*"; }
 journal() { logger -t poderebot-update -- "$*" 2>/dev/null || true; }
 sanitize() { printf '%s' "${1//\"/\'}" | tr '\n' ' '; }
-sysctl_() { /usr/bin/systemctl "$@"; }
+sysctl_() { sudo -n /usr/bin/systemctl "$@"; }
 
 write_state() {
     local result="$1" from="$2" to="$3" reason="$4" failed="${5:-}"
@@ -313,8 +313,21 @@ fi
 log "stopping the watchdog timer for the swap"
 sysctl_ stop poderebot-wd.timer || true
 
-log "swapping the publish folder"
+old_pid=$(systemctl show -p MainPID --value poderebot.service 2>/dev/null || echo 0)
+log "stopping the service (pid ${old_pid:-0})"
 sysctl_ stop poderebot.service || true
+stopped=0
+for _ in $(seq 1 20); do
+    if ! systemctl is-active --quiet poderebot.service; then stopped=1; break; fi
+    sleep 1
+done
+if [ "$stopped" -ne 1 ]; then
+    rm -rf "$ROOT/build.next"
+    sysctl_ start poderebot-wd.timer || true
+    finish "failed" "$local_sha" "$remote_sha" "the service did not stop, nothing was swapped" "" 1
+fi
+
+log "swapping the publish folder"
 rm -rf "$ROOT/build.old"
 mv "$ROOT/build" "$ROOT/build.old"
 mv "$ROOT/build.next" "$ROOT/build"
@@ -324,24 +337,37 @@ for runtime_file in db.json users.json usage.json; do
         log "preserved $runtime_file from the previous build"
     fi
 done
-sysctl_ start poderebot.service || true
 
-if wait_healthy; then
+sysctl_ start poderebot.service || true
+started=0
+for _ in $(seq 1 30); do
+    if systemctl is-active --quiet poderebot.service; then started=1; break; fi
+    sleep 1
+done
+new_pid=$(systemctl show -p MainPID --value poderebot.service 2>/dev/null || echo 0)
+
+# A healthy port is not enough: the process must have been restarted, otherwise the old
+# binary is still serving while build/ already holds the new one.
+if [ "$started" -eq 1 ] && [ "${new_pid:-0}" != "${old_pid:-0}" ] && wait_healthy; then
     rm -rf "$ROOT/build.old"
     sysctl_ start poderebot-wd.timer || true
     finish "updated" "$local_sha" "$remote_sha" "applied $remote_sha" "" 0
 fi
 
-log "health check failed, rolling back to $local_sha"
+log "the update did not become healthy, rolling back to $local_sha"
 sysctl_ stop poderebot.service || true
+for _ in $(seq 1 20); do
+    systemctl is-active --quiet poderebot.service || break
+    sleep 1
+done
 rm -rf "$ROOT/build.failed.${remote_sha:0:12}"
 mv "$ROOT/build" "$ROOT/build.failed.${remote_sha:0:12}"
 mv "$ROOT/build.old" "$ROOT/build"
 git reset --hard "$local_sha" >/dev/null 2>&1
 sysctl_ start poderebot.service || true
 sysctl_ start poderebot-wd.timer || true
-wait_healthy || log "service is still unhealthy after the rollback"
-finish "rolled-back" "$local_sha" "$remote_sha" "health check failed within ${HEALTH_TIMEOUT}s" "$remote_sha" 1
+wait_healthy || log "the service is still unhealthy after the rollback"
+finish "rolled-back" "$local_sha" "$remote_sha" "the new build did not become healthy" "$remote_sha" 1
 EOF
 
 chmod +x "$ROOT/run.sh" "$ROOT/patch.sh" "$ROOT/update.sh"
