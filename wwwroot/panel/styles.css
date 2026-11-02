@@ -19,7 +19,6 @@
   --bg: #0a0c0b;
   --rail: #070908;
   --card: #131714;
-  --card-2: #101411;
   --elev: #171c18;
   --line: rgba(255, 255, 255, 0.065);
   --line-soft: rgba(255, 255, 255, 0.04);
@@ -388,10 +387,6 @@ button {
   background: var(--card);
 }
 
-.card.quiet {
-  background: var(--card);
-}
-
 .card-head {
   display: flex;
   align-items: flex-start;
@@ -709,6 +704,7 @@ button {
 .spark {
   position: relative;
   height: 56px;
+  color: var(--accent);
 }
 
 .spark-empty {
@@ -856,10 +852,6 @@ button {
   border-bottom: 2px solid rgba(224, 163, 67, 0.68);
 }
 
-.tl-block span {
-  display: none;
-}
-
 .tl-now {
   position: absolute;
   top: -3px;
@@ -988,19 +980,6 @@ button {
   gap: 10px;
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dim);
-  flex: none;
-}
-
-.status-dot.on {
-  background: var(--amber);
-  box-shadow: 0 0 0 4px var(--amber-soft);
-}
-
 .heating-text b {
   display: block;
   font-size: 13px;
@@ -1083,6 +1062,7 @@ button {
 .chart-plot {
   position: relative;
   min-width: 0;
+  color: var(--accent);
 }
 
 .chart-plot svg {
@@ -1200,12 +1180,6 @@ button {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-}
-
-.gate-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
 }
 
 .log-list {

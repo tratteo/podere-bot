@@ -36,6 +36,8 @@ The touch panel is served by the same process. On the Pi the HDMI screen opens `
 
 Hard-resets to `origin/<branch>`, rebuilds and restarts. Works with or without `sudo`. Keeps `.env`, `db.json`, `users.json` and `panel.db`.
 
+`patch.sh` and `update.sh` are different paths: `patch.sh` is manual and follows the branch you are on, so it also deploys unmerged work; `update.sh` is automatic, follows only `release`, builds beside the running service and rolls back when `/api/health` does not come back.
+
 ## Automatic update
 
 `install.sh` also installs `poderebot-update.timer`, which runs `update.sh` every 10 minutes (`UPDATE_INTERVAL` in `.env`, e.g. `15min`).

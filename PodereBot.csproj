@@ -32,9 +32,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include=".env" Condition="Exists('.env')">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
     <EmbeddedResource Include="appsettings.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </EmbeddedResource>

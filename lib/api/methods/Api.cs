@@ -89,12 +89,6 @@ internal record GetHealthResponse
 
 internal class Api : IEndpoint
 {
-    public static DateTime FromUnixTimestamp(double timestamp)
-    {
-        DateTime origin = new(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc);
-        return origin.AddSeconds(timestamp);
-    }
-
     public static async Task<Results<Ok, BadRequest>> PostTemperature(
         PostTemperatureBody body,
         ILogger<Program> logger,

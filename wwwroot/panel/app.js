@@ -48,8 +48,6 @@ const state = {
   customTo: '',
   events: [],
   eventFilter: 'all',
-  devices: [],
-  pendingPairing: null,
   loading: true,
   offline: false,
 };
@@ -863,8 +861,8 @@ function sparkline(values) {
   const area = `${pad},${h - pad} ${line} ${w - pad},${h - pad}`;
   const last = points[points.length - 1];
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
-    <polygon points="${area}" fill="rgba(245,165,36,.08)"></polygon>
-    <polyline points="${line}" fill="none" stroke="#f5a524" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline>
+    <polygon points="${area}" fill="currentColor" fill-opacity=".08"></polygon>
+    <polyline points="${line}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline>
   </svg><span class="spark-dot" style="left:${(last[0] / w) * 100}%;top:${(last[1] / h) * 100}%"></span>`;
 }
 
@@ -874,8 +872,7 @@ function timeline(intervals, compact = false) {
     .map((i) => {
       const left = (i.from / 1440) * 100;
       const width = ((i.to - i.from) / 1440) * 100;
-      const label = compact ? '' : `<span>${fmt(i.temperature)}°</span>`;
-      return `<div class="tl-block" style="left:${left}%;width:${width}%" title="${minutesToTime(i.from)} - ${minutesToTime(i.to)} · ${fmt(i.temperature)} °C">${label}</div>`;
+      return `<div class="tl-block" style="left:${left}%;width:${width}%" title="${minutesToTime(i.from)} - ${minutesToTime(i.to)} · ${fmt(i.temperature)} °C"></div>`;
     })
     .join('');
   const nowMin = state.now.getHours() * 60 + state.now.getMinutes();
@@ -954,8 +951,8 @@ function temperatureChart() {
     <div class="chart-plot">
       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
         ${grid}
-        <path d="${band}" fill="rgba(224,163,67,.10)"/>
-        <path d="${line}" fill="none" stroke="#e0a343" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+        <path d="${band}" fill="currentColor" fill-opacity=".10"/>
+        <path d="${line}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
       </svg>
       <span class="chart-dot" style="left:${(x(last.at) / W) * 100}%;top:${(y(last.avg) / H) * 100}%"></span>
     </div>
@@ -1020,7 +1017,6 @@ function closeSheet() {
   clearTimeout(sheetTimer);
   clearTimeout(qrTimer);
   qrTimer = null;
-  state.pendingPairing = null;
   sheetTimer = setTimeout(() => {
     sheet.hidden = true;
     backdrop.hidden = true;
@@ -1464,7 +1460,6 @@ async function createDevice(id) {
 }
 
 function showPairing(ticket) {
-  state.pendingPairing = ticket;
   document.getElementById('sheet-title').textContent = 'Inquadra il QR code';
   document.getElementById('sheet-body').textContent = `Apri la fotocamera del dispositivo "${ticket.name}" e inquadra il codice. Il link vale una sola volta.`;
   document.getElementById('sheet-content').innerHTML = `
