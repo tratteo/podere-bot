@@ -93,6 +93,18 @@ CSharpier (`.csharpierrc.json`): printWidth 140, tabWidth 4, no tabs.
 
 Systemd watchdog polls `GET /api/health` every 10 minutes; restarts the service if it fails. It passes `X-Api-Token` when `API_TOKEN` is set in `.env`.
 
+## Runtime state location
+
+`db.json`, `users.json` and `usage.json` live at `IHostEnvironment.ContentRootPath`, which is the repository root because `run.sh` starts the app from there. The first start migrates a copy found inside the publish folder (`build/`), so replacing the publish folder on update never destroys runtime state.
+
+## Auto update
+
+`release` is a fast-forward-only branch. The CI job `promote-release` moves it to the verified `main` commit only after the Release build and the tests pass, and refuses when `release` contains commits that are not in `main`. The workflow runs on pushes to `main` and on pull requests, so pushing `release` does not re-trigger it.
+
+`install.sh` generates `update.sh` (gitignored, like `patch.sh`), the `poderebot-update.service` + `poderebot-update.timer` pair (default every 10 minutes, `UPDATE_INTERVAL` in `.env`, e.g. `15min`), `/etc/sudoers.d/020-poderebot-update` restricted to the `systemctl stop|start|restart` calls the updater needs, and `.install-state` with the fingerprints of `install.sh` and of the installed units.
+
+The updater takes a `flock` and is a no-op when `HEAD` equals `origin/release`. It refuses when the worktree is dirty, when `install.sh` or the unit files differ from `.install-state` (a manual `install.sh` run is required), or when free space is below `UPDATE_MIN_FREE_MB` (default 1024). It builds into `build.next` while the service keeps running, stops the watchdog timer, swaps `build` with `build.old`, restarts the service and waits for `/api/health` with the token from `.env`; on timeout it restores `build.old`, resets the repository to the previous SHA and restarts. A failed SHA is recorded in `update-state.json` and never retried. `update.sh --check` only reports the SHAs. Nothing reboots the Pi.
+
 ## What is NOT here
 
 - CI runs `dotnet build -c Release` and `dotnet test` on every push (`.github/workflows/ci.yml`)

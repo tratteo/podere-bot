@@ -34,50 +34,67 @@ public class DatabaseSchema
 
 internal class Database
 {
-    private static readonly string DB_PATH = Path.Join(AppContext.BaseDirectory, "db.json");
+    public const string FileName = "db.json";
+
     private static readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true };
 
     private readonly ILogger<Database> logger;
     private readonly object sync = new();
+    private readonly string dbPath;
 
     private readonly DatabaseSchema data;
     public DatabaseSchema Data => data.Clone();
 
-    public Database(ILogger<Database> logger)
+    /// <summary>The path the database is stored at; exposed so the updater and tests can reason about it.</summary>
+    public string Path => dbPath;
+
+    public Database(IHostEnvironment environment, ILogger<Database> logger)
+        : this(environment, logger, AppContext.BaseDirectory) { }
+
+    internal Database(IHostEnvironment environment, ILogger<Database> logger, string publishFolder)
     {
         this.logger = logger;
-        if (File.Exists(DB_PATH))
+        dbPath = System.IO.Path.Join(environment.ContentRootPath, FileName);
+
+        // Runtime state must survive the updater replacing the publish folder.
+        RuntimeFile.Migrate(FileName, environment.ContentRootPath, publishFolder, logger);
+
+        data = Load();
+    }
+
+    private DatabaseSchema Load()
+    {
+        if (!File.Exists(dbPath))
         {
-            try
-            {
-                data = JsonSerializer.Deserialize<DatabaseSchema>(File.ReadAllText(DB_PATH), jsonOptions) ?? new DatabaseSchema();
-                logger.LogDebug("local db found and loaded");
-            }
-            catch (Exception ex)
-            {
-                logger.LogError("unable to read {p}, starting from an empty database: {e}", DB_PATH, ex);
-                data = new DatabaseSchema();
-            }
+            logger.LogDebug("local db not found at {p}", dbPath);
+            return new DatabaseSchema();
         }
-        else
+
+        try
         {
-            data = new DatabaseSchema();
-            logger.LogDebug("local db not found");
+            var loaded = JsonSerializer.Deserialize<DatabaseSchema>(File.ReadAllText(dbPath), jsonOptions);
+            logger.LogDebug("local db found and loaded from {p}", dbPath);
+            return loaded ?? new DatabaseSchema();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("unable to read {p}, starting from an empty database: {e}", dbPath, ex);
+            return new DatabaseSchema();
         }
     }
 
     private void Save()
     {
-        var tmpPath = $"{DB_PATH}.tmp";
+        var tmpPath = $"{dbPath}.tmp";
         try
         {
             File.WriteAllText(tmpPath, JsonSerializer.Serialize(data, jsonOptions) + "\n");
-            File.Move(tmpPath, DB_PATH, true);
-            logger.LogTrace("local db serialized > {p}", DB_PATH);
+            File.Move(tmpPath, dbPath, true);
+            logger.LogTrace("local db serialized > {p}", dbPath);
         }
         catch (Exception ex)
         {
-            logger.LogError("unable to write {p}: {e}", DB_PATH, ex);
+            logger.LogError("unable to write {p}: {e}", dbPath, ex);
             if (File.Exists(tmpPath))
                 File.Delete(tmpPath);
         }
@@ -95,8 +112,8 @@ internal class Database
     /// <summary>Checks that the directory holding the database accepts writes.</summary>
     public bool TryProbeWritable()
     {
-        var directory = Path.GetDirectoryName(DB_PATH) ?? AppContext.BaseDirectory;
-        var probe = Path.Join(directory, ".db-probe");
+        var directory = System.IO.Path.GetDirectoryName(dbPath) ?? AppContext.BaseDirectory;
+        var probe = System.IO.Path.Join(directory, ".db-probe");
         try
         {
             File.WriteAllText(probe, DateTime.UtcNow.ToString("O"));

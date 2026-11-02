@@ -9,6 +9,13 @@ users.json
 usage.json
 run.sh
 patch.sh
+update.sh
+update-state.json
+.install-state
+.update.lock
+build.next/
+build.old/
+build.failed.*/
 
 # Visual Studio Code
 .vscode

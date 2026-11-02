@@ -29,3 +29,33 @@ jobs:
 
       - name: Test
         run: dotnet test tests/poderebot.tests/PodereBot.Tests.csproj -c Release
+
+  promote-release:
+    name: Fast-forward release
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # release is only ever moved forward, and only to a commit whose build and tests passed.
+      # Pushing to release does not re-trigger this workflow: it runs on main and pull requests only.
+      - name: Fast-forward release to the verified commit
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin '+refs/heads/release:refs/remotes/origin/release' || true
+          if git rev-parse --verify --quiet refs/remotes/origin/release >/dev/null; then
+            if ! git merge-base --is-ancestor refs/remotes/origin/release HEAD; then
+              echo "::error::release contains commits that are not in main; refusing to move it"
+              exit 1
+            fi
+            if [ "$(git rev-parse refs/remotes/origin/release)" = "$(git rev-parse HEAD)" ]; then
+              echo "release is already at $HEAD"
+              exit 0
+            fi
+          fi
+          git push origin "HEAD:refs/heads/release"

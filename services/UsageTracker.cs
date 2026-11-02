@@ -36,6 +36,7 @@ internal class UsageTracker
         this.logger = logger;
         this.pricing = pricing;
         path = Path.Join(environment.ContentRootPath, "usage.json");
+        RuntimeFile.Migrate("usage.json", environment.ContentRootPath, AppContext.BaseDirectory, logger);
         Load();
     }
 

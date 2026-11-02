@@ -164,6 +164,8 @@ internal sealed class UserDirectory
             seed[entry.Id] = entry.Normalized();
         }
 
+        RuntimeFile.Migrate(RuntimeFileName, environment.ContentRootPath, AppContext.BaseDirectory, logger);
+
         Reload();
         MigrateLegacyFile();
     }

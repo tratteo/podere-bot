@@ -62,12 +62,14 @@ public sealed class HealthAndPrivilegeTests
         }
 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(data).Build();
+        var contentRoot = Path.Join(Path.GetTempPath(), $"poderebot-priv-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(contentRoot);
         var directory = new UserDirectory(
             configuration,
-            new TestEnvironment { ContentRootPath = Path.GetTempPath() },
+            new TestEnvironment { ContentRootPath = contentRoot },
             NullLogger<UserDirectory>.Instance
         );
-        var db = new Database(NullLogger<Database>.Instance);
+        var db = new Database(new TestEnvironment { ContentRootPath = contentRoot }, NullLogger<Database>.Instance);
 
         return new GateAccessService(configuration, db, directory, NullLogger<GateAccessService>.Instance);
     }
