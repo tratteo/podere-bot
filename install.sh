@@ -304,7 +304,9 @@ fi
 
 log "building $remote_sha into build.next"
 rm -rf "$ROOT/build.next"
-if ! dotnet publish "$ROOT/PodereBot.csproj" -c Release -r linux-arm64 --self-contained false -o "$ROOT/build.next" >/dev/null 2>&1; then
+# The fd holding the lock is closed for the build: the persistent .NET build servers would
+# inherit it and keep the updater locked out until they exit.
+if ! ( exec 9>&-; dotnet publish "$ROOT/PodereBot.csproj" -c Release -r linux-arm64 --self-contained false -o "$ROOT/build.next" >/dev/null 2>&1 ); then
     rm -rf "$ROOT/build.next"
     git reset --hard "$local_sha" >/dev/null 2>&1
     finish "failed" "$local_sha" "$remote_sha" "release build failed" "" 1
