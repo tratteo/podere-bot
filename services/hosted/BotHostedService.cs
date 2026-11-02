@@ -27,6 +27,7 @@ internal class BotHostedService : IHostedService
     private readonly Database db;
     private readonly StartupGate startup;
     private readonly NotificationLog log;
+    private readonly WeatherService weather;
     private readonly TimeSpan sensorTolerance;
     private DateTime startedUtc;
     private readonly List<BotCommand> allCommands;
@@ -51,7 +52,8 @@ internal class BotHostedService : IHostedService
         HeatingDriver heatingDriver,
         Database db,
         StartupGate startup,
-        NotificationLog log
+        NotificationLog log,
+        WeatherService weather
     )
     {
         this.logger = logger;
@@ -64,6 +66,7 @@ internal class BotHostedService : IHostedService
         this.db = db;
         this.startup = startup;
         this.log = log;
+        this.weather = weather;
         sensorTolerance = TimeSpan.FromSeconds(
             Math.Max(10, configuration.GetValue<int?>("Heating:TempSensorsToleranceSeconds") ?? 60)
         );
@@ -245,7 +248,13 @@ internal class BotHostedService : IHostedService
             sb.AppendLine($"🌡️ Locale: <b>{probe.Temperature.Value:0.0} °C</b>");
         else
             sb.AppendLine($"🌡️ Locale: <b>non disponibile</b> <i>({TemperatureCause(probe.Status)})</i>");
-        sb.AppendLine($"📡 Esterni: {DescribeExternal(external.Count, fresh.Count)}");
+        var outdoor = await weather.GetAsync(TimeSpan.FromSeconds(8), cancellationToken);
+        sb.AppendLine(
+            outdoor != null
+                ? $"🌤️ Esterno: <b>{outdoor.Temperature:0.0} °C</b> <i>(Open-Meteo)</i>"
+                : "🌤️ Esterno: <b>non disponibile</b> <i>(Open-Meteo)</i>"
+        );
+        sb.AppendLine($"📡 Sensori esterni: {DescribeExternal(external.Count, fresh.Count)}");
         sb.AppendLine($"📅 Programma: {DescribeProgram(data.HeatingProgram)}");
         sb.AppendLine($"🔐 Cancelli: {DescribeGates(data.GatesOpenAccessExpirationDate)}");
 

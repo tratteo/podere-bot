@@ -69,7 +69,7 @@ User names in the panel come from `users.json` when set, otherwise from Telegram
 
 The panel UI is monochrome (white on black or black on white); colour is reserved for icons, states and badges. Theme (`Automatico`/`Scuro`/`Chiaro`), animations (`Complete`/`Ridotte`) and the idle screen delay are per-device preferences in `localStorage` (`pb.theme`, `pb.motion`, `pb.idle`), set in Sistema › Aspetto. `app.js` morphs the view in place on every poll instead of replacing it, so transitions and running animations survive; elements marked `data-keep` belong to script (the animated temperature). Every write goes through `optimistic()`: it snapshots the overview, applies the change locally, shows a loading toast, then reconciles with the server overview or, on failure, restores the snapshot and refreshes. The blob behind the temperature is two radial gradients animated only with `transform` (no `filter: blur`), coloured by the operative temperature: flat blue up to 10 °C, then 15, 18, 20, 24, 28 °C stops.
 
-Outdoor weather comes from Open-Meteo (`WeatherService`, no key) for the `Home` coordinates, refreshed every `Weather:RefreshMinutes` (15) and exposed as `weather` in the panel overview; a failed refresh keeps the last reading. `/sendpos` reads the same `Home` section. A future outdoor sensor should take precedence over it.
+Outdoor weather comes from Open-Meteo (`WeatherService`, no key) for the `Home` coordinates, refreshed every `Weather:RefreshMinutes` (15) and exposed as `weather` in the panel overview; a failed refresh keeps the last reading. It is display only: the `Presente` reports it as `Esterno (Open-Meteo)` and the panel lists it under Sistema › Sensori, but it never enters the operational temperature or the heating logic. `/sendpos` reads the same `Home` section. A future outdoor sensor should take precedence over it.
 
 `db.json` stores `GatesOpenAccessStartDate` next to the expiration, set by every writer of the window (panel, `/gates`, AI tool) and cleared with it, so the panel can draw the remaining-time bar.
 
@@ -89,7 +89,7 @@ Antifreeze (`Heating:Antifreeze`) runs before the program: below `ThresholdCelsi
 
 Every notification is routed by topic through `UserDirectory.Subscribers(topic)`; no chat id is hardcoded. `technical` carries system and sensor events, `heating` the boiler and temperature events, `gates` the openings and the access window. Subscriptions are explicit for every user, admins included. `BotHostedService.NotifyTopicAsync` and the `NotifyTopic` extension are the only senders.
 
-On boot `BotHostedService` sends a single `Presente` summary with boiler, operative/local temperatures, external sensors, program, gate window and warnings, instead of the per-daemon startup messages. `StartupGate` silences the monitor until the summary is sent and suppresses a second summary when the process restarts within 10 minutes; `offline` is sent only when the process ran longer than 10 minutes.
+On boot `BotHostedService` sends a single `Presente` summary with boiler, operative/local temperatures, external sensors, the Open-Meteo outdoor temperature, program, gate window and warnings, instead of the per-daemon startup messages. `StartupGate` silences the monitor until the summary is sent and suppresses a second summary when the process restarts within 10 minutes; `offline` is sent only when the process ran longer than 10 minutes.
 
 ## Gate access
 

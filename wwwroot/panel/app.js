@@ -1127,6 +1127,7 @@ function renderSystem() {
               return healthRow('wifi', st === 'ok' ? 'b' : st === 'stale' ? 'a' : '', esc(s.location), `<span class="mono">${fmt(s.temperature)}°</span> · ${relative(s.timestamp)}`);
             })
             .join('')}
+          ${healthRow('cloud', w ? 'b' : '', 'Esterno (Open-Meteo)', w ? `<span class="mono">${fmt(w.temperature)}°</span> · ${relative(w.updatedAt)}` : 'Non disponibile')}
         </div>
       </section>
     </div>
