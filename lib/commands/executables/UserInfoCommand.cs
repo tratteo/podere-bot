@@ -16,7 +16,19 @@ internal class UserInfoCommand(
 {
     private static readonly JsonSerializerOptions jsonOptions = new() { WriteIndented = true };
     private User? user;
-    private long OwnerId => users.AdminIds().FirstOrDefault(Arguments.Message.Chat.Id);
+
+    /// <summary>
+    /// The forward target never depends on who sent the command: a normal user used to compute
+    /// a zero id and the forward silently failed. Configured owner first, then the first admin.
+    /// </summary>
+    private long OwnerId
+    {
+        get
+        {
+            var configured = configuration.GetValue<long?>("Telegram:OwnerId") ?? 0;
+            return configured > 0 ? configured : users.AdminIds().FirstOrDefault();
+        }
+    }
 
     protected override async Task ExecuteInternal()
     {
@@ -37,12 +49,41 @@ internal class UserInfoCommand(
 
     protected override async Task OnCallback(Update update, string callbackData)
     {
-        await Arguments.Client.SendMessage(
-            OwnerId,
-            $"Nuove info 📥\n\n<pre language='json'>{JsonSerializer.Serialize(user, jsonOptions)}</pre>",
-            parseMode: ParseMode.Html
-        );
-        await Arguments.Client.SendMessage(Arguments.Message.Chat.Id, "🟢 Ho inoltrato le info a Trat");
+        var owner = OwnerId;
+        if (owner <= 0)
+        {
+            await Arguments.Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "🔴 Nessun destinatario configurato: avvisa un amministratore.",
+                disableNotification: true
+            );
+            await DetachEvents();
+            return;
+        }
+
+        var payload = user ?? update.CallbackQuery?.From;
+        try
+        {
+            await Arguments.Client.SendMessage(
+                owner,
+                $"Nuove info 📥\n\n<pre language='json'>{JsonSerializer.Serialize(payload, jsonOptions)}</pre>",
+                parseMode: ParseMode.Html
+            );
+            await Arguments.Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "🟢 Ho inoltrato le info a Trat",
+                disableNotification: true
+            );
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("unable to forward user info to {owner}: {message}", owner, ex.Message);
+            await Arguments.Client.SendMessage(
+                Arguments.Message.Chat.Id,
+                "🔴 Non sono riuscito a inoltrare le info. Riprova tra poco.",
+                disableNotification: true
+            );
+        }
 
         await DetachEvents();
     }

@@ -36,6 +36,8 @@ Admin commands are also hidden from non-admins through Telegram command scopes: 
 
 Interactive commands use `AttachEvents()`/`DetachEvents()` pattern for inline keyboard callbacks. Messages queued for deletion via `DeleteOnDetach()` are cleaned up on detach.
 
+`/myinfo` shows the sender's Telegram profile and forwards it to `Telegram:OwnerId` (fallback: the first admin), never to an id derived from the sender.
+
 Bot language is **Italian**.
 
 ## REST API
@@ -60,6 +62,8 @@ Three Kestrel ports: `0.0.0.0:5050` for the REST API and MCP, `127.0.0.1:5051` f
 Devices are authorised per device, never by client IP, MAC or hostname. The kiosk (or `panel-pair.sh`, which uses the token on 5051) creates a device name and a single-use link, returns it once with a server-generated QR SVG (`QRCoder`), and stores only the SHA-256 hash. Redeeming the link on 5052 sets the `poderebot_panel` cookie (HttpOnly, SameSite=Strict, `Panel:SessionDays`); every request is checked against the stored key hash. Revoking a device deletes it from the list, frees its name and invalidates the cookie. Writes on 5052 also require `X-Panel: 1` and a same-origin `Origin`. The QR and the cookie travel in clear text: LAN HTTP is a testing choice, production needs HTTPS or Tailscale.
 
 `Panel:LanHost` must be a stable Pi address or name (`poderebot.local`), because the cookie is bound to that origin. Without it the first non-loopback IPv4 is used, preferring `192.168.x`.
+
+User names in the panel come from `users.json` when set, otherwise from Telegram (`GetChat`, cached for a day). The pencil on a user card edits the stored name; clearing it falls back to Telegram.
 
 `panel.db` (SQLite, `Microsoft.Data.Sqlite`, WAL) holds `temperature_hourly`, `events` and `panel_devices`. `TemperatureHistoryRecorder` samples the operational temperature every `Panel:History:SampleMinutes` (5), folds it into the UTC hour with average/min/max/samples, and prunes history to `RetentionDays` (365) daily. `NotificationLog` records every notification before the Telegram send and keeps `Panel:Events:MaxEntries` (500) entries for `RetentionDays` (30). Panel actions are audit events with topic `panel`.
 

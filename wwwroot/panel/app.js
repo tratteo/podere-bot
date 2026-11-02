@@ -726,6 +726,7 @@ function userCard(u) {
     <div class="user-head">
       <span class="avatar">${esc(initials(label))}</span>
       <div class="user-main"><b>${esc(label)}</b><span>ID ${u.id}${u.runtimeOnly ? ' · runtime' : ''}</span></div>
+      <button class="icon-btn" data-action="edit-name" data-user="${u.id}" aria-label="Modifica il nome di ${esc(label)}" title="Modifica nome">${icon('edit')}</button>
       <button class="icon-btn danger" data-action="remove-user" data-user="${u.id}" aria-label="Rimuovi ${esc(label)}" title="${lastAdmin ? 'Serve almeno un admin' : ''}">${icon('trash')}</button>
     </div>
     <div class="user-section">
@@ -1202,8 +1203,7 @@ async function toggleLights() {
 
 /* ---------- user actions ---------- */
 
-function openAddUser() {
-  document.getElementById('sheet-title').textContent = 'Aggiungi utente';
+function openAddUser() {  document.getElementById('sheet-title').textContent = 'Aggiungi utente';
   document.getElementById('sheet-body').textContent = "Inserisci l'ID Telegram e scegli ruoli e topic.";
   document.getElementById('sheet-content').innerHTML = `<div class="user-form">
     <label class="field"><span>ID Telegram</span><input id="new-user-id" type="text" inputmode="numeric" autocomplete="off" placeholder="123456789"></label>
@@ -1261,6 +1261,44 @@ async function saveUser() {
     await write('/users', { method: 'POST', body: { id, name, entitlements, topics } });
     closeSheet();
     toast('Utente aggiunto');
+  } catch (e) {
+    error.textContent = e.message;
+  }
+}
+
+function openEditName(userId) {
+  const user = state.overview.users.find((u) => u.id === userId);
+  if (!user) return;
+
+  document.getElementById('sheet-title').textContent = 'Nome utente';
+  document.getElementById('sheet-body').textContent =
+    "Il nome è un'etichetta del pannello. Se lo lasci vuoto provo a leggerlo da Telegram.";
+  document.getElementById('sheet-content').innerHTML = `<div class="user-form">
+    <label class="field"><span>Nome</span><input id="name-input" data-user="${user.id}" type="text" maxlength="80" autocomplete="off" value="${esc(user.name || '')}" placeholder="Es. Matteo"></label>
+    <p class="form-error" id="name-error"></p>
+  </div>`;
+  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Annulla</button><button class="btn primary" data-action="save-name">Salva</button>`;
+  confirmAction = null;
+  showSheet();
+}
+
+async function saveName() {
+  const input = document.getElementById('name-input');
+  const error = document.getElementById('name-error');
+  if (!input || !error) return;
+  error.textContent = '';
+
+  const id = Number(input.dataset.user);
+  const user = state.overview.users.find((u) => u.id === id);
+  if (!user) return;
+
+  try {
+    await write('/users/' + id, {
+      method: 'PATCH',
+      body: { name: input.value.trim(), entitlements: user.entitlements, topics: user.topics },
+    });
+    closeSheet();
+    toast('Nome aggiornato');
   } catch (e) {
     error.textContent = e.message;
   }
@@ -1566,6 +1604,8 @@ document.addEventListener('click', async (event) => {
   else if (action === 'lights') await toggleLights();
   else if (action === 'add-user') openAddUser();
   else if (action === 'save-user') await saveUser();
+  else if (action === 'edit-name') openEditName(Number(button.dataset.user));
+  else if (action === 'save-name') await saveName();
   else if (action === 'toggle-role') await toggleRole(Number(button.dataset.user), button.dataset.role);
   else if (action === 'toggle-topic') await toggleTopic(Number(button.dataset.user), button.dataset.topic);
   else if (action === 'remove-user') confirmRemoveUser(Number(button.dataset.user));

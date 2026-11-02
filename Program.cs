@@ -67,6 +67,7 @@ builder.Services.AddSingleton<GateControlService>();
 builder.Services.AddSingleton<HeatingStatusService>();
 builder.Services.AddSingleton<AdminScopeNotifier>();
 builder.Services.AddSingleton<UserAdminService>();
+builder.Services.AddSingleton<PanelUserNames>();
 builder.Services.AddSingleton<UpdateStateStore>();
 builder.Services.AddSingleton<PanelSnapshotService>();
 

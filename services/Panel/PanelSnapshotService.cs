@@ -13,6 +13,7 @@ internal sealed class PanelSnapshotService(
     ITemperatureDriver temperatureReader,
     GateAccessService gateAccess,
     UserDirectory users,
+    PanelUserNames userNames,
     UsageTracker usage,
     PanelStore store,
     PanelDeviceService devices,
@@ -60,6 +61,7 @@ internal sealed class PanelSnapshotService(
         var data = db.Data;
         var expiration = data.GatesOpenAccessExpirationDate;
         var alerts = BuildAlerts(heating, sensors, probe.Status, report);
+        var userDtos = await BuildUsersAsync(cancellationToken);
 
         return new PanelOverviewDto(
             DateTime.Now,
@@ -101,17 +103,7 @@ internal sealed class PanelSnapshotService(
                 sensors,
                 Trend()
             ),
-            users.All()
-                .Select(u => new PanelUserDto(
-                    u.Id,
-                    u.Name,
-                    u.Entitlements,
-                    u.Topics,
-                    u.IsAdmin,
-                    u.CanControlGates,
-                    users.IsRuntimeOnly(u.Id)
-                ))
-                .ToList(),
+            userDtos,
             devices
                 .List()
                 .Select(d => new PanelDeviceDto(
@@ -136,6 +128,25 @@ internal sealed class PanelSnapshotService(
     {
         var now = DateTime.UtcNow;
         return store.Hourly(now.AddHours(-12), now.AddHours(1)).Select(b => Math.Round(b.Avg, 1)).ToList();
+    }
+
+    private async Task<IReadOnlyList<PanelUserDto>> BuildUsersAsync(CancellationToken cancellationToken)
+    {
+        var entries = users.All();
+        var resolved = await Task.WhenAll(
+            entries.Select(async u =>
+                new PanelUserDto(
+                    u.Id,
+                    u.Name ?? await userNames.ResolveAsync(u.Id, cancellationToken),
+                    u.Entitlements,
+                    u.Topics,
+                    u.IsAdmin,
+                    u.CanControlGates,
+                    users.IsRuntimeOnly(u.Id)
+                )
+            )
+        );
+        return resolved;
     }
 
     private List<PanelAlertDto> BuildAlerts(
