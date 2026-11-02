@@ -38,6 +38,7 @@ internal sealed class PanelDeviceService(
             command.CommandText = """
                 SELECT id, name, pairing_hash, pairing_expires_at, created_at, created_by, last_seen_at, revoked_at
                 FROM panel_devices
+                WHERE revoked_at IS NULL
                 ORDER BY created_at DESC;
                 """;
             using var reader = command.ExecuteReader();
@@ -239,13 +240,16 @@ internal sealed class PanelDeviceService(
         return null;
     }
 
+    /// <summary>
+    /// Revoking deletes the device: the cookie stops matching, the list stays clean and the name
+    /// becomes available again. The audit event keeps the trace of who removed it.
+    /// </summary>
     public void Revoke(string id)
     {
         using var connection = store.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE panel_devices SET revoked_at = $now, pairing_hash = NULL WHERE id = $id;";
+        command.CommandText = "DELETE FROM panel_devices WHERE id = $id;";
         command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         if (command.ExecuteNonQuery() == 0)
             throw new PanelValidationException("Dispositivo inesistente.");
     }

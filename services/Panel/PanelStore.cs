@@ -100,6 +100,7 @@ internal sealed class PanelStore
                         revoked_at INTEGER
                     );
                     CREATE INDEX IF NOT EXISTS devices_pairing ON panel_devices(pairing_hash);
+                    DELETE FROM panel_devices WHERE revoked_at IS NOT NULL;
                     """;
                 command.ExecuteNonQuery();
                 Available = true;
