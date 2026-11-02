@@ -39,7 +39,7 @@ internal sealed class HeatingMonitorDaemon(
             {
                 await CheckBoilerAsync();
                 await CheckTemperatureAsync(stoppingToken);
-                CheckSensors();
+                await CheckSensorsAsync();
             }
             catch (Exception ex)
             {
@@ -131,12 +131,11 @@ internal sealed class HeatingMonitorDaemon(
         }
     }
 
-    private void CheckSensors() => _ = ReportStaleSensorsAsync();
-
-    private async Task ReportStaleSensorsAsync()
+    private async Task CheckSensorsAsync()
     {
-        var known = temperatureDriver.GetExternalTemperatureReadings();
-        var fresh = temperatureDriver.GetExternalTemperatureReadings(sensorTolerance);
+        // Only operational sensors raise alerts: informational readings are not used for control.
+        var known = temperatureDriver.GetExternalTemperatureReadings().Where(r => !r.Informational).ToList();
+        var fresh = temperatureDriver.GetExternalTemperatureReadings(sensorTolerance).Where(r => !r.Informational).ToList();
         var freshIds = fresh.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var reading in known)

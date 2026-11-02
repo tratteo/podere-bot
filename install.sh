@@ -75,6 +75,14 @@ for key in TELEGRAM_API_KEY ZEN_API_KEY; do
     fi
 done
 
+echo - checking API token
+if ! grep -Eq "^[[:space:]]*(export[[:space:]]+)?API_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]]" "$ROOT/.env"; then
+    api_token=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    printf 'API_TOKEN=%s\n' "$api_token" >> "$ROOT/.env"
+    chown "$user":"$user" "$ROOT/.env"
+    echo "generated API_TOKEN in $ROOT/.env (required by /api and /mcp)"
+fi
+
 echo - fixing ownership of $ROOT
 chown -R "$user":"$user" "$ROOT"
 

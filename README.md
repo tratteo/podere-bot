@@ -111,6 +111,6 @@ The limit applies only to users without `admin` or `gate_controller`. When a sha
 
 `GET /api/status`, `/api/temperatures`, `/api/heating`, `/api/gates`, `/api/health`; `POST /api/temperature`. `/api/health` answers 503 when the Telegram connection or the database is unhealthy, and it is what the systemd watchdog checks.
 
-Set `API_TOKEN=...` in `.env` to require the `X-Api-Token` header on every `/api/*` and `/mcp` request. With no token, the local-network restriction is the only guard.
+`install.sh` generates `API_TOKEN` in `.env` when it is missing, and the app then requires the `X-Api-Token` header on every `/api/*` and `/mcp` request. Clear the value in `.env` only if you deliberately want the local-network restriction to be the only guard.
 
 Users are the `Users` seed in `appsettings.json` merged with the gitignored `users.json`, minus the ids under `Removed`. Each entry has `Id`, optional `Name`, `Entitlements` and `Topics`. The entitlements are `admin` (implies every other entitlement and every topic) and `gate_controller` (opens the gates at any time, without being an admin). The topics are `technical`, `heating` and `gates`. A user with no entry, or with no entitlement, is a normal user. `/adminpanel` (admin only) lists them as Telegram contacts and manages entitlements and topics; changes persist across `patch.sh`. A legacy `admins.json` is migrated once and then deleted. Admin commands are hidden from non-admins.

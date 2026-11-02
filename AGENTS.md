@@ -51,7 +51,7 @@ All endpoints are restricted to local network (192.168.x.x, 127.0.0.1). Binds to
 | GET | `/api/gates` | Access window, users who had access, rate limit settings |
 | POST | `/api/temperature` | Accept external sensor readings |
 
-API endpoints auto-register via `IEndpoint` reflection (same pattern as commands). When `Api:Token` (or `API_TOKEN` in `.env`) is set, every `/api/*` and `/mcp` request must send it in the `X-Api-Token` header; when it is empty the local-network restriction is the only guard and the watchdog works without a token.
+API endpoints auto-register via `IEndpoint` reflection (same pattern as commands). `install.sh` generates `API_TOKEN` into `.env` when missing, so on a real deployment every `/api/*` and `/mcp` request must send it in the `X-Api-Token` header (compared in constant time); the watchdog reads the same value. Clearing the value disables the requirement and leaves the local-network restriction as the only guard.
 
 ## Heating
 

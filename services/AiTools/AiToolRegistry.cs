@@ -124,7 +124,7 @@ internal sealed class AiToolRegistry
                     if (!AdminAuthorization.TryAuthorize(users))
                         return "Non autorizzato: servono permessi admin.";
                     var expiration = db.Data.GatesOpenAccessExpirationDate;
-                    if (expiration == null || expiration < DateTime.Now)
+                    if (!GateAccessPolicy.IsOpen(expiration, DateTime.Now))
                         return "I cancelli sono bloccati. Solo gli amministratori possono aprirli.";
                     return $"I cancelli sono sbloccati fino al {expiration:dd/MM/yyyy HH:mm}.";
                 },
