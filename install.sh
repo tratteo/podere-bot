@@ -146,6 +146,14 @@ echo - stopping service
 sys stop poderebot.service || true
 trap 'sys start poderebot.service || true' EXIT
 
+echo - preserving runtime state from the previous build
+for runtime_file in db.json users.json usage.json; do
+    if [ -f "$REPO_DIR/build/$runtime_file" ] && [ ! -f "$REPO_DIR/$runtime_file" ]; then
+        mv "$REPO_DIR/build/$runtime_file" "$REPO_DIR/$runtime_file"
+        echo "  moved build/$runtime_file to $runtime_file"
+    fi
+done
+
 echo - cleaning old build output
 rm -rf "$REPO_DIR/build"
 
@@ -310,6 +318,12 @@ sysctl_ stop poderebot.service || true
 rm -rf "$ROOT/build.old"
 mv "$ROOT/build" "$ROOT/build.old"
 mv "$ROOT/build.next" "$ROOT/build"
+for runtime_file in db.json users.json usage.json; do
+    if [ -f "$ROOT/build.old/$runtime_file" ] && [ ! -f "$ROOT/$runtime_file" ]; then
+        mv "$ROOT/build.old/$runtime_file" "$ROOT/$runtime_file"
+        log "preserved $runtime_file from the previous build"
+    fi
+done
 sysctl_ start poderebot.service || true
 
 if wait_healthy; then
@@ -338,6 +352,15 @@ if systemctl is-active --quiet poderebot.service 2>/dev/null; then
     was_running=1
     systemctl stop poderebot.service
 fi
+echo - preserving runtime state from the previous build
+for runtime_file in db.json users.json usage.json; do
+    if [ -f "$ROOT/build/$runtime_file" ] && [ ! -f "$ROOT/$runtime_file" ]; then
+        mv "$ROOT/build/$runtime_file" "$ROOT/$runtime_file"
+        chown "$user":"$user" "$ROOT/$runtime_file"
+        echo "  moved build/$runtime_file to $runtime_file"
+    fi
+done
+
 echo - cleaning old build output
 rm -rf "$ROOT/build"
 as_user dotnet publish "$ROOT/PodereBot.csproj" -c Release -r linux-arm64 --self-contained false -o "$ROOT/build"
