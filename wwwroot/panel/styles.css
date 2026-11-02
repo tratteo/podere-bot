@@ -1520,16 +1520,14 @@ button {
 
 .win-text {
   position: relative;
+  display: grid;
   flex: 1;
   min-width: 0;
-  height: 58px;
 }
 
+/* Both states share the same cell, so the card grows to the taller one instead of clipping. */
 .win-text > div {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
+  grid-area: 1 / 1;
   transition: opacity 0.35s ease, transform 0.35s var(--ease);
 }
 
@@ -1569,21 +1567,18 @@ button {
 
 .slot {
   position: relative;
-  height: 58px;
+  display: grid;
 }
 
 .slot > div {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
+  grid-area: 1 / 1;
   transition: opacity 0.35s ease, transform 0.35s var(--ease);
 }
 
 .slot .sa {
   display: flex;
   align-items: center;
-  height: 58px;
+  min-height: 58px;
   font-size: 15px;
   color: var(--dim);
 }
@@ -2488,13 +2483,254 @@ button {
   }
 }
 
+@media (max-width: 1024px) {
+  body {
+    font-size: 15px;
+  }
+
+  :root {
+    --gap: 20px;
+    --radius: 28px;
+  }
+
+  .card {
+    padding: 28px 30px;
+    gap: 24px;
+  }
+
+  .topbar h1 {
+    font-size: 30px;
+  }
+
+  .chip {
+    height: 52px;
+    padding: 0 20px;
+    font-size: 14.5px;
+  }
+
+  .ibtn {
+    width: 52px;
+    height: 52px;
+  }
+
+  .clock b {
+    font-size: 26px;
+  }
+
+  .title {
+    font-size: 21px;
+  }
+
+  .sub {
+    font-size: 15px;
+  }
+
+  .badge {
+    height: 35px;
+    padding: 0 14px;
+    font-size: 13.5px;
+  }
+
+  .btn {
+    height: 58px;
+    padding: 0 22px;
+    font-size: 16px;
+    border-radius: 18px;
+  }
+
+  .btn.s {
+    height: 52px;
+    padding: 0 18px;
+    font-size: 15px;
+  }
+
+  .btn.square {
+    width: 52px;
+  }
+
+  .gb {
+    padding: 22px 24px;
+    font-size: 19.5px;
+    border-radius: 24px;
+  }
+
+  .gb small {
+    font-size: 14px;
+  }
+
+  .gb.h-lg {
+    height: 156px;
+  }
+
+  .gb.h-md {
+    height: 114px;
+  }
+
+  .gb.xl {
+    height: 258px;
+    padding: 32px;
+    font-size: 26px;
+  }
+
+  .gb.xl .gi .icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .temp {
+    font-size: 124px;
+  }
+
+  .mini .sico {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .sico {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+  }
+
+  .sico .icon {
+    width: 21px;
+    height: 21px;
+  }
+
+  .seg button {
+    height: 52px;
+    padding: 0 18px;
+    font-size: 15px;
+  }
+
+  .seg.sm button {
+    height: 44px;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+
+  .seg.tall button {
+    height: 58px;
+    font-size: 16px;
+  }
+
+  .seg.xl button {
+    height: 70px;
+    font-size: 17px;
+  }
+
+  .switch {
+    width: 54px;
+    height: 32px;
+  }
+
+  .switch::after {
+    width: 24px;
+    height: 24px;
+  }
+
+  .switch[aria-checked='true']::after {
+    transform: translateX(22px);
+  }
+
+  .setrow {
+    min-height: 78px;
+  }
+
+  .setrow.tall {
+    min-height: 88px;
+  }
+
+  .setrow b {
+    font-size: 17px;
+  }
+
+  .setrow .d {
+    font-size: 14.5px;
+  }
+
+  .hrow {
+    min-height: 70px;
+  }
+
+  .hrow b {
+    font-size: 16px;
+  }
+
+  .hrow .v {
+    font-size: 15px;
+  }
+
+  .ev {
+    min-height: 70px;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 16px;
+  }
+
+  .ev b {
+    font-size: 16px;
+  }
+
+  .ev .ev-sub,
+  .ev time {
+    font-size: 14px;
+  }
+
+  .evi {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .ul {
+    min-height: 76px;
+  }
+
+  .avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+  }
+
+  .avatar.lg {
+    width: 58px;
+    height: 58px;
+    font-size: 16px;
+  }
+
+  .field input,
+  .field select {
+    height: 54px;
+    font-size: 16px;
+  }
+
+  .sheet {
+    padding: 32px;
+  }
+
+  .sheet h2 {
+    font-size: 25px;
+  }
+
+  .sheet p {
+    font-size: 16px;
+  }
+
+  .sheet-actions .btn {
+    height: 62px;
+    font-size: 16px;
+  }
+}
+
 @media (max-width: 860px) {
   .chip .chip-label {
     display: none;
   }
 
   .chip {
-    width: 56px;
+    width: 52px;
+    height: 52px;
     padding: 0;
     justify-content: center;
   }
@@ -2525,6 +2761,24 @@ button {
     flex-wrap: wrap;
     padding: 16px 0;
   }
+
+  /* A long segmented control scrolls inside its own pill instead of running off the card. */
+  .head > .seg {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .head > .seg::-webkit-scrollbar {
+    display: none;
+  }
+
+  .head > .seg button {
+    gap: 4px;
+    padding: 0 6px;
+    font-size: 12.5px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -2532,7 +2786,11 @@ button {
     --pad-x: 16px;
     --pad-top: 20px;
     --gap: 16px;
-    --radius: 26px;
+    --radius: 24px;
+  }
+
+  body {
+    font-size: 14.5px;
   }
 
   .app {
@@ -2544,15 +2802,16 @@ button {
   }
 
   .main {
-    padding-bottom: calc(110px + env(safe-area-inset-bottom));
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
   }
 
   .topbar {
-    margin-bottom: 24px;
+    min-height: 52px;
+    margin-bottom: 20px;
   }
 
   .topbar h1 {
-    font-size: 26px;
+    font-size: 25px;
   }
 
   .clock {
@@ -2560,11 +2819,21 @@ button {
   }
 
   .top-right {
-    gap: 10px;
+    gap: 8px;
+  }
+
+  .chip {
+    width: 48px;
+    height: 48px;
+  }
+
+  .ibtn {
+    width: 48px;
+    height: 48px;
   }
 
   #top-action .btn {
-    width: 56px;
+    width: 48px;
     padding: 0;
   }
 
@@ -2573,24 +2842,156 @@ button {
   }
 
   .card {
-    padding: 24px 22px;
-    gap: 22px;
+    padding: 22px 20px;
+    gap: 18px;
+  }
+
+  .title {
+    font-size: 19px;
+  }
+
+  .sub {
+    font-size: 14.5px;
+  }
+
+  .k,
+  .note {
+    font-size: 14px;
+  }
+
+  .btn {
+    height: 54px;
+    padding: 0 20px;
+    font-size: 15px;
+    border-radius: 16px;
+  }
+
+  .btn.s {
+    height: 48px;
+    padding: 0 16px;
+    font-size: 14.5px;
+  }
+
+  .btn.square {
+    width: 48px;
+  }
+
+  .seg {
+    padding: 4px;
+    border-radius: 18px;
+  }
+
+  .seg button {
+    height: 46px;
+    padding: 0 16px;
+    border-radius: 14px;
+    font-size: 14.5px;
+  }
+
+  .seg.sm button {
+    height: 40px;
+    padding: 0 12px;
+    font-size: 13.5px;
+  }
+
+  .seg.tall button {
+    height: 54px;
+    font-size: 15px;
+  }
+
+  .seg.xl button {
+    height: 60px;
+    font-size: 16px;
+  }
+
+  .badge {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .sico {
+    width: 46px;
+    height: 46px;
+    border-radius: 15px;
+  }
+
+  .sico .icon {
+    width: 20px;
+    height: 20px;
   }
 
   .temp {
-    font-size: 88px;
+    font-size: 82px;
   }
 
   .minis {
-    margin-top: 28px;
+    gap: 16px 26px;
+    margin-top: 26px;
+  }
+
+  .mini .sico {
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+  }
+
+  .mini-value b {
+    font-size: 22px;
+  }
+
+  .mini-value span {
+    font-size: 13px;
+  }
+
+  .hero-line {
+    margin-top: 22px;
+  }
+
+  .hero-foot {
+    padding-top: 28px;
+  }
+
+  .boil {
+    font-size: 16px;
   }
 
   .gate-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .gb {
+    padding: 18px 20px;
+    font-size: 18px;
+    border-radius: 20px;
+  }
+
+  .gb small {
+    font-size: 13.5px;
+  }
+
+  .gb .gi .icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .gb.h-lg {
+    height: 128px;
+  }
+
+  .gb.h-md {
+    height: 96px;
+  }
+
   .gb.xl {
-    height: 150px;
+    height: 140px;
+    padding: 22px;
+    font-size: 22px;
+  }
+
+  .gb.xl .gi .icon {
+    width: 42px;
+    height: 42px;
   }
 
   .seg.tall {
@@ -2601,8 +3002,230 @@ button {
     flex: 1 0 28%;
   }
 
+  /* The window card stacks instead of overlapping: title above, action on its own row. */
+  .win-head {
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .win-head .row {
+    flex: 1 1 100%;
+    gap: 14px;
+  }
+
+  .win-text .sub {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+  }
+
+  .win:not(.open) .lockbtn {
+    display: none;
+  }
+
+  .win.open .lockbtn {
+    flex: 1 1 100%;
+  }
+
+  /* Inline cards: icon and text on the first row, the action full width below. */
+  .card.inline {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 14px;
+    padding: 18px 20px;
+  }
+
+  .card.inline > .btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .lights-btn {
+    min-width: 0;
+  }
+
+  /* Preferences rows: the label keeps the first row, the control takes the full width. */
+  .setrow {
+    min-height: 0;
+    gap: 12px;
+    padding: 14px 0;
+  }
+
+  .setrow.tall {
+    min-height: 0;
+  }
+
+  .setrow b {
+    font-size: 16.5px;
+  }
+
+  .setrow .d {
+    font-size: 14px;
+  }
+
+  .setrow > .seg {
+    display: flex;
+    flex: 1 1 100%;
+  }
+
+  .setrow > .seg button {
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 6px;
+    padding: 0 8px;
+    font-size: 14px;
+  }
+
+  .setrow > .setrow-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .setrow > .setrow-actions .seg {
+    display: flex;
+    flex: 1 1 60%;
+  }
+
+  .setrow > .setrow-actions .seg button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .setrow > .setrow-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  /* The user detail head keeps the avatar row, then the actions. */
+  .udetail .head {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .udetail .head > .row {
+    flex: 1 1 100%;
+  }
+
+  .udetail .actions-inline {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+
+  .udetail .title {
+    font-size: 21px;
+  }
+
+  .ul {
+    min-height: 72px;
+    padding: 0 14px;
+    border-radius: 20px;
+  }
+
+  .ul b {
+    font-size: 16px;
+  }
+
+  .avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 15px;
+    font-size: 14px;
+  }
+
+  .avatar.lg {
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+    font-size: 15px;
+  }
+
+  .ev {
+    min-height: 62px;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: 14px;
+  }
+
+  .evi {
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+  }
+
+  .ev b {
+    font-size: 15.5px;
+  }
+
+  .ev .ev-sub,
+  .ev time {
+    font-size: 13.5px;
+  }
+
+  .hrow {
+    min-height: 62px;
+    gap: 14px;
+  }
+
+  .hrow b {
+    font-size: 15.5px;
+  }
+
+  .hrow .v {
+    font-size: 14.5px;
+  }
+
+  .kv {
+    min-height: 44px;
+    font-size: 15px;
+  }
+
+  .alert-row {
+    min-height: 72px;
+    gap: 14px;
+  }
+
+  .alert-row b {
+    font-size: 16px;
+  }
+
+  .alert-row span {
+    font-size: 14px;
+  }
+
+  .sec {
+    margin: 22px 0 12px;
+    font-size: 13px;
+  }
+
+  .cap {
+    margin-top: 12px;
+    font-size: 14px;
+  }
+
   .editor-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: end;
+  }
+
+  .editor-actions {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .editor-actions .btn {
+    flex: 1 1 100%;
+  }
+
+  .field input,
+  .field select {
+    height: 50px;
+    padding: 0 14px;
+    border-radius: 14px;
+    font-size: 16px;
+  }
+
+  .field > span {
+    font-size: 14px;
   }
 
   .sheet {
@@ -2612,8 +3235,8 @@ button {
     bottom: 0;
     width: 100%;
     max-height: 90dvh;
-    padding: 28px 22px calc(28px + env(safe-area-inset-bottom));
-    border-radius: 28px 28px 0 0;
+    padding: 24px 20px calc(24px + env(safe-area-inset-bottom));
+    border-radius: 26px 26px 0 0;
     transform: translateY(100%);
   }
 
@@ -2625,17 +3248,29 @@ button {
     display: block;
     width: 40px;
     height: 5px;
-    margin: -12px auto 4px;
+    margin: -10px auto 4px;
     border-radius: 3px;
     background: var(--soft-2);
   }
 
+  .sheet h2 {
+    font-size: 22px;
+  }
+
+  .sheet p {
+    font-size: 15px;
+  }
+
   .sheet-actions .btn {
-    height: 64px;
+    height: 56px;
+    font-size: 15.5px;
   }
 
   .toast {
-    bottom: calc(96px + env(safe-area-inset-bottom));
+    bottom: calc(84px + env(safe-area-inset-bottom));
+    height: 52px;
+    padding: 0 18px;
+    font-size: 15px;
   }
 
   .tabs {
@@ -2647,7 +3282,7 @@ button {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 4px;
-    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
     background: var(--rail);
     border-top: 1px solid var(--line);
     transition: var(--tone);
@@ -2658,17 +3293,22 @@ button {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 3px;
     min-width: 0;
-    height: 64px;
+    height: 56px;
     border: 0;
-    border-radius: 18px;
+    border-radius: 16px;
     background: transparent;
     color: var(--dim);
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 500;
     cursor: pointer;
     transition: var(--tone);
+  }
+
+  .tabs button .icon {
+    width: 21px;
+    height: 21px;
   }
 
   .tabs button span {
@@ -2693,5 +3333,75 @@ button {
 
   .idle-clock {
     font-size: 120px;
+  }
+
+  /* A 24 hour bar is too narrow for block labels: the section subtitle carries the same detail. */
+  .blk .bl {
+    display: none;
+  }
+
+  /* Login and pairing pages */
+  .gate-wrap {
+    padding: 32px 20px calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .gate-card {
+    gap: 16px;
+  }
+
+  .gate-card h1 {
+    font-size: 32px;
+  }
+
+  .gate-sub {
+    font-size: 16px;
+  }
+
+  .gate-form {
+    gap: 14px;
+    margin-top: 8px;
+  }
+
+  .gate-form .btn {
+    height: 56px;
+    font-size: 16px;
+  }
+
+  .gate-help {
+    gap: 8px;
+    padding-top: 18px;
+    font-size: 14px;
+  }
+
+  .gate-help code {
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 420px) {
+  /* Under 420 px a title and its badge stop sharing one row instead of clipping. */
+  .head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .device-card .head > .row {
+    flex: 1 1 100%;
+  }
+
+  /* Under 420 px the segmented control drops its icons so the labels still fit. */
+  .setrow > .seg .icon {
+    display: none;
+  }
+
+  /* Five ranges do not fit one row: the pill wraps instead of hiding the last option. */
+  .head > .seg {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .head > .seg button {
+    flex: 1 1 30%;
   }
 }

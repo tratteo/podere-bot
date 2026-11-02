@@ -762,7 +762,7 @@ function timeline(intervals, options = {}) {
         if (width > 16) label = `${minutesToTime(i.from)}–${minutesToTime(i.to)} · ${fmt(i.temperature)}°`;
         else if (width > 5) label = `${fmt(i.temperature)}°`;
       }
-      return `<div class="blk mono" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="${minutesToTime(i.from)}–${minutesToTime(i.to)} · ${fmt(i.temperature)} °C">${label}</div>`;
+      return `<div class="blk mono" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="${minutesToTime(i.from)}–${minutesToTime(i.to)} · ${fmt(i.temperature)} °C">${label ? `<span class="bl">${label}</span>` : ''}</div>`;
     })
     .join('');
   const ticks = options.fine ? ['00', '03', '06', '09', '12', '15', '18', '21', '24'] : ['00', '06', '12', '18', '24'];
