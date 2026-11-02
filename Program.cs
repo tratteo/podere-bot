@@ -110,7 +110,10 @@ app.Services.GetRequiredService<ModelPricing>();
 
 app.Use(Middleware.RestrictToLocalNetwork);
 
-var apiToken = builder.Configuration["Api:Token"];
+var apiToken = builder.Configuration["API_TOKEN"];
+if (string.IsNullOrWhiteSpace(apiToken))
+    apiToken = builder.Configuration["Api:Token"];
+
 if (!string.IsNullOrWhiteSpace(apiToken))
 {
     var expected = Encoding.UTF8.GetBytes(apiToken);
