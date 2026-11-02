@@ -5,6 +5,8 @@ namespace PodereBot.Services;
 /// <summary>
 /// Keeps startup notifications quiet until the boot summary has been sent, and suppresses a
 /// second boot summary when the service is restarted shortly after the previous one.
+/// The Raspberry Pi has no RTC: at boot the clock can be behind the last announce, so a
+/// timestamp in the future means "announce", not "stay quiet for hours".
 /// </summary>
 internal sealed class StartupGate
 {
@@ -15,27 +17,43 @@ internal sealed class StartupGate
     private readonly ILogger<StartupGate> logger;
     private readonly string path;
     private volatile bool ready;
+    private DateTime? lastAnnounceUtc;
 
     public bool Ready => ready;
-    public bool ShouldAnnounce { get; }
+
+    public bool ShouldAnnounce
+    {
+        get
+        {
+            var last = lastAnnounceUtc;
+            if (last == null)
+                return true;
+
+            var now = DateTime.UtcNow;
+            return now < last.Value || now - last.Value > QuietWindow;
+        }
+    }
 
     public StartupGate(IHostEnvironment environment, ILogger<StartupGate> logger)
     {
         this.logger = logger;
         path = Path.Join(environment.ContentRootPath, FileName);
-        var last = ReadLastAnnounce();
-        ShouldAnnounce = last == null || DateTime.UtcNow - last > QuietWindow;
+        lastAnnounceUtc = ReadLastAnnounce();
     }
 
-    public void MarkReady()
-    {
-        ready = true;
-        if (!ShouldAnnounce)
-            return;
+    /// <summary>Marks the monitor ready even when Telegram is still unreachable.</summary>
+    public void MarkReady() => ready = true;
 
+    /// <summary>Called only after the summary was actually sent.</summary>
+    public void MarkAnnounced()
+    {
+        lastAnnounceUtc = DateTime.UtcNow;
         try
         {
-            File.WriteAllText(path, JsonSerializer.Serialize(new Marker { LastAnnounceUtc = DateTime.UtcNow }, jsonOptions) + "\n");
+            File.WriteAllText(
+                path,
+                JsonSerializer.Serialize(new Marker { LastAnnounceUtc = lastAnnounceUtc.Value }, jsonOptions) + "\n"
+            );
         }
         catch (Exception ex)
         {

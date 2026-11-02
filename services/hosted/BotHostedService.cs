@@ -144,6 +144,7 @@ internal class BotHostedService : IHostedService
         {
             await SendStartupSummaryAsync(cancellationToken);
             summarySent = true;
+            startup.MarkAnnounced();
         }
         catch (Exception ex)
         {
