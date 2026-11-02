@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e0d">
+<title>PodereBot · Accesso</title>
+<link rel="stylesheet" href="styles.css?v=13">
+</head>
+<body class="gate-page">
+  <main class="gate-card">
+    <span class="brand-mark"></span>
+    <h1>PodereBot</h1>
+    <p class="gate-sub">Questo pannello è riservato ai dispositivi autorizzati.</p>
+
+    <form id="pair-form" class="gate-form">
+      <label class="field">
+        <span>Codice di pairing</span>
+        <input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Incolla qui il codice del link">
+      </label>
+      <p class="form-error" id="error"></p>
+      <button class="btn primary" type="submit">Autorizza questo dispositivo</button>
+    </form>
+
+    <div class="gate-help">
+      <p>Il codice si genera dal pannello, in <b>Dispositivi &rsaquo; Aggiungi dispositivo</b>, oppure dal Raspberry con:</p>
+      <code>./panel-pair.sh "nome dispositivo"</code>
+      <p>Il link vale una sola volta e scade dopo pochi minuti. Se è scaduto, generane uno nuovo.</p>
+    </div>
+  </main>
+
+  <script>
+    const form = document.getElementById('pair-form');
+    const tokenInput = document.getElementById('token');
+    const error = document.getElementById('error');
+
+    const params = new URLSearchParams(location.search);
+    if (params.get('token')) tokenInput.value = params.get('token');
+
+    fetch('/panel/api/whoami', { credentials: 'same-origin', cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.authenticated) location.replace('/panel/');
+      })
+      .catch(() => {});
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      error.textContent = '';
+      const token = tokenInput.value.trim();
+      if (!token) {
+        error.textContent = 'Incolla il codice di pairing.';
+        return;
+      }
+      try {
+        const response = await fetch('/panel/api/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ token }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || 'Pairing non riuscito.');
+        location.replace('/panel/');
+      } catch (e) {
+        error.textContent = e.message;
+      }
+    });
+  </script>
+</body>
+</html>

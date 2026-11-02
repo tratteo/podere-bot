@@ -1,19 +1,14 @@
-using PodereBot.Lib;
 using PodereBot.Services;
-using PodereBot.Services.Hosted;
 
 internal class HeatingDriver(
     ILogger<HeatingDriver> logger,
     IPinDriver pinDriver,
     IConfiguration configuration,
     ITemperatureDriver temperatureReader,
-    BotHostedService bot,
     Database db
 )
 {
-
     private readonly int heatingPin = configuration.GetValue<int>("Pins:Heating");
-    private bool temperatureUnavailableNotified = false;
     private readonly TimeSpan readingsTimespan = TimeSpan.FromSeconds(
         configuration.GetValue<int?>("Heating:TempSensorsToleranceSeconds") ?? 60
     );
@@ -30,19 +25,8 @@ internal class HeatingDriver(
         var temperatures = operationalReadings.ConvertAll(r => r.Temperature);
         var localTemperature = await temperatureReader.GetLocalTemperature(cancellationToken);
         if (localTemperature != null)
-        {
-            if (temperatureUnavailableNotified)
-            {
-                _ = bot.NotifyTopicAsync(NotificationTopic.Technical, "Sensore locale tornato disponibile.");
-                temperatureUnavailableNotified = false;
-            }
             temperatures.Add((float)localTemperature);
-        }
-        else if (!temperatureUnavailableNotified)
-        {
-            _ = bot.NotifyTopicAsync(NotificationTopic.Technical, "Sensore locale non disponibile.");
-            temperatureUnavailableNotified = true;
-        }
+
         if (temperatures.Count > 0)
         {
             logger.LogDebug(
@@ -62,12 +46,21 @@ internal class HeatingDriver(
         if (status)
         {
             pinDriver.PinHigh(heatingPin);
-            db.Edit(d => d.BoilerActive = true);
+            db.Edit(d =>
+            {
+                d.BoilerActive = true;
+                if (d.BoilerSinceUtc == null)
+                    d.BoilerSinceUtc = DateTime.UtcNow;
+            });
         }
         else
         {
             pinDriver.PinLow(heatingPin);
-            db.Edit(d => d.BoilerActive = false);
+            db.Edit(d =>
+            {
+                d.BoilerActive = false;
+                d.BoilerSinceUtc = null;
+            });
         }
     }
 }

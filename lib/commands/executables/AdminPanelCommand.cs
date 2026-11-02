@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using PodereBot.Services;
 using PodereBot.Services.Hosted;
+using PodereBot.Services.Panel;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -14,9 +15,9 @@ namespace PodereBot.Lib.Commands;
 internal class AdminPanelCommand(
     ILogger<AdminPanelCommand> logger,
     IConfiguration configuration,
-    BotHostedService bot,
     PendingInputRegistry pendingInputs,
-    UserDirectory users
+    UserDirectory users,
+    UserAdminService userAdmin
 ) : Command(logger, configuration, users)
 {
     private enum Screen
@@ -30,7 +31,6 @@ internal class AdminPanelCommand(
 
     private const int RequestUsersId = 1;
     private readonly ILogger<AdminPanelCommand> logger = logger;
-    private readonly BotHostedService bot = bot;
     private readonly PendingInputRegistry pendingInputs = pendingInputs;
     private Screen screen = Screen.Panel;
     private long? selectedId;
@@ -119,23 +119,25 @@ internal class AdminPanelCommand(
     {
         var all = users.All();
         var names = await ResolveNamesAsync(all);
-        var sb = new StringBuilder("👑 <b>Pannello utenti</b>\n\n");
+        var adminCount = all.Count(u => u.IsAdmin);
+        var sb = new StringBuilder("👑 <b>Pannello utenti</b>\n");
+        sb.AppendLine($"<i>{all.Count} utenti · {adminCount} admin</i>");
+        sb.AppendLine();
+
         if (all.Count == 0)
         {
             sb.AppendLine("Nessun utente configurato.");
         }
         else
         {
-            foreach (var user in all)
-            {
-                sb.AppendLine($"• {UserLink(user.Id, names[user.Id])} <code>{user.Id}</code>");
-                var badges = BuildBadges(user);
-                if (badges.Length > 0)
-                    sb.AppendLine($"  {badges}");
-            }
+            sb.AppendLine(
+                string.Join(
+                    "\n\n",
+                    all.Select(user => $"👤 {UserLink(user.Id, names[user.Id])} <code>{user.Id}</code>\n↳ {BuildBadges(user)}")
+                )
+            );
         }
-        sb.AppendLine();
-        sb.AppendLine($"Totale: <b>{all.Count}</b> utenti, <b>{all.Count(u => u.IsAdmin)}</b> admin");
+
         AppendNotice(sb);
 
         var kbd = new InlineKeyboardMarkup();
@@ -161,19 +163,32 @@ internal class AdminPanelCommand(
         sb.AppendLine($"<code>{user.Id}</code>");
         sb.AppendLine();
         sb.AppendLine("<b>Permessi</b>");
-        sb.AppendLine($"• {ToggleLabel("admin", "👑", user.IsAdmin)}");
-        sb.AppendLine($"• {ToggleLabel("gate_controller", "🔑", user.Entitlements.Contains(Entitlement.GateController))}");
+        foreach (var entitlement in Entitlement.All)
+            sb.AppendLine(EntitlementLine(entitlement, user));
         sb.AppendLine();
         sb.AppendLine("<b>Topic</b>");
+
         foreach (var topic in NotificationTopic.All)
-            sb.AppendLine($"• {ToggleLabel(topic, "#", user.IsSubscribed(topic))}");
+            sb.AppendLine(TopicLine(topic, user));
         AppendNotice(sb);
 
         var kbd = new InlineKeyboardMarkup();
         foreach (var entitlement in Entitlement.All)
-            kbd.AddButton(ToggleButton(entitlement, user.Entitlements.Contains(entitlement)), EncodeCallbackQueryData($"te:{id}:{entitlement}")).AddNewRow();
+        {
+            if (entitlement == Entitlement.GateController && user.IsAdmin)
+                continue;
+            var active = user.Entitlements.Contains(entitlement, StringComparer.OrdinalIgnoreCase);
+            kbd.AddButton(
+                    ToggleButton(EntitlementIcon(entitlement), entitlement, active),
+                    EncodeCallbackQueryData($"te:{id}:{entitlement}")
+                )
+                .AddNewRow();
+        }
         foreach (var topic in NotificationTopic.All)
-            kbd.AddButton(ToggleButton(topic, user.IsSubscribed(topic)), EncodeCallbackQueryData($"tt:{id}:{topic}")).AddNewRow();
+        {
+            var active = user.Topics.Contains(topic, StringComparer.OrdinalIgnoreCase);
+            kbd.AddButton(ToggleButton(TopicIcon(topic), topic, active), EncodeCallbackQueryData($"tt:{id}:{topic}")).AddNewRow();
+        }
         kbd.AddButton("🗑️ Rimuovi utente", EncodeCallbackQueryData($"ask:{id}")).AddNewRow();
         kbd.AddButton("↩️ Indietro", EncodeCallbackQueryData("back"));
         return (sb.ToString().TrimEnd(), kbd);
@@ -190,14 +205,21 @@ internal class AdminPanelCommand(
         }
 
         var name = await ResolveNameAsync(user);
+        var entitlement = pendingEntitlement ?? "permesso";
+        var icon = EntitlementIcon(entitlement);
         var sb = new StringBuilder();
-        sb.AppendLine($"⚠️ Rimuovere <code>{pendingEntitlement}</code> da {UserLink(id, name)}?");
-        sb.AppendLine("L'utente perde subito i permessi collegati.");
+        sb.AppendLine($"⚠️ <b>Rimuovere {icon} {entitlement}?</b>");
+        sb.AppendLine($"Da {UserLink(id, name)}.");
+        sb.AppendLine(
+            entitlement == Entitlement.Admin
+                ? "Perde il ruolo admin. I topic restano invariati."
+                : "Perde l'accesso ai cancelli."
+        );
         AppendNotice(sb);
 
         var kbd = new InlineKeyboardMarkup();
         kbd.AddButton("✅ Rimuovi", EncodeCallbackQueryData($"ce:{id}")).AddNewRow();
-        kbd.AddButton("❌ Annulla", EncodeCallbackQueryData($"u:{id}"));
+        kbd.AddButton("↩️ Annulla", EncodeCallbackQueryData($"u:{id}"));
         return (sb.ToString().TrimEnd(), kbd);
     }
 
@@ -212,14 +234,22 @@ internal class AdminPanelCommand(
 
         var name = await ResolveNameAsync(user);
         var sb = new StringBuilder();
-        sb.AppendLine($"Rimuovere {UserLink(user.Id, name)}?");
-        sb.AppendLine($"<code>{user.Id}</code>");
+        var kbd = new InlineKeyboardMarkup();
+
         if (user.IsAdmin && users.AdminIds().Length <= 1)
-            sb.AppendLine();
+        {
+            sb.AppendLine("🔴 <b>Non posso rimuovere l'ultimo amministratore.</b>");
+            sb.AppendLine($"Rendi admin qualcun altro prima di rimuovere {UserLink(id, name)}.");
+            AppendNotice(sb);
+            kbd.AddButton("↩️ Indietro", EncodeCallbackQueryData($"u:{id}"));
+            return (sb.ToString().TrimEnd(), kbd);
+        }
+
+        sb.AppendLine($"⚠️ <b>Rimuovere {UserLink(id, name)}?</b>");
+        sb.AppendLine($"<code>{id}</code>");
+        sb.AppendLine();
         sb.AppendLine("Perde tutti i permessi e le iscrizioni ai topic.");
         AppendNotice(sb);
-
-        var kbd = new InlineKeyboardMarkup();
         kbd.AddButton("✅ Rimuovi", EncodeCallbackQueryData($"rm:{id}")).AddNewRow();
         kbd.AddButton("↩️ Annulla", EncodeCallbackQueryData($"u:{id}"));
         return (sb.ToString().TrimEnd(), kbd);
@@ -243,21 +273,54 @@ internal class AdminPanelCommand(
         return kbd;
     }
 
-    private static string ToggleLabel(string name, string icon, bool active) =>
-        $"{icon} <code>{name}</code> {(active ? "✅" : "➖")}";
+    private static string EntitlementIcon(string entitlement) =>
+        entitlement switch
+        {
+            Entitlement.Admin => "👑",
+            Entitlement.GateController => "🔑",
+            _ => "•",
+        };
 
-    private static string ToggleButton(string name, bool active) => $"{(active ? "✅" : "➖")} {name}";
+    private static string TopicIcon(string topic) =>
+        topic switch
+        {
+            NotificationTopic.Technical => "🛠️",
+            NotificationTopic.Heating => "🔥",
+            NotificationTopic.Gates => "🚪",
+            _ => "🔔",
+        };
+
+    private static string EntitlementLine(string entitlement, UserEntry user)
+    {
+        var icon = EntitlementIcon(entitlement);
+        if (entitlement == Entitlement.GateController && user.IsAdmin)
+            return $"{icon} <b>{entitlement}</b> · <i>implicito (admin)</i>";
+        var active = user.Entitlements.Contains(entitlement, StringComparer.OrdinalIgnoreCase);
+        return $"{icon} <b>{entitlement}</b> · {(active ? "attivo" : "assente")}";
+    }
+
+    private static string TopicLine(string topic, UserEntry user)
+    {
+        var active = user.Topics.Contains(topic, StringComparer.OrdinalIgnoreCase);
+        return $"{TopicIcon(topic)} <b>{topic}</b> · {(active ? "attivo" : "assente")}";
+    }
+
+    private static string ToggleButton(string icon, string name, bool active) =>
+        active ? $"➖ {icon} {name}" : $"➕ {icon} {name}";
 
     private static string BuildBadges(UserEntry user)
     {
         var parts = new List<string>();
         if (user.IsAdmin)
-            parts.Add("👑 admin");
-        if (user.Entitlements.Contains(Entitlement.GateController))
-            parts.Add("🔑 gate_controller");
-        foreach (var topic in user.Topics)
-            parts.Add($"#{topic}");
-        return string.Join(" · ", parts);
+            parts.Add($"{EntitlementIcon(Entitlement.Admin)} admin");
+        else if (user.Entitlements.Contains(Entitlement.GateController, StringComparer.OrdinalIgnoreCase))
+            parts.Add($"{EntitlementIcon(Entitlement.GateController)} gate_controller");
+
+        foreach (var topic in NotificationTopic.All)
+            if (user.Topics.Contains(topic, StringComparer.OrdinalIgnoreCase))
+                parts.Add($"{TopicIcon(topic)} {topic}");
+
+        return parts.Count == 0 ? "<i>nessun permesso</i>" : string.Join(" · ", parts);
     }
 
     private void AppendNotice(StringBuilder sb)
@@ -303,13 +366,24 @@ internal class AdminPanelCommand(
                 {
                     var target = users.Find(entId);
                     var normalized = Entitlement.Normalize(parts[2]);
-                    if (target != null && normalized != null && target.Entitlements.Contains(normalized))
+                    if (target != null && normalized != null)
                     {
-                        selectedId = entId;
-                        pendingEntitlement = normalized;
-                        screen = Screen.ConfirmEntitlement;
-                        await RenderAsync();
-                        return;
+                        if (normalized == Entitlement.GateController && target.IsAdmin)
+                        {
+                            selectedId = entId;
+                            screen = Screen.User;
+                            notice = "🟡 <b>gate_controller</b> è implicito nel ruolo admin.";
+                            await RenderAsync();
+                            return;
+                        }
+                        if (target.Entitlements.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                        {
+                            selectedId = entId;
+                            pendingEntitlement = normalized;
+                            screen = Screen.ConfirmEntitlement;
+                            await RenderAsync();
+                            return;
+                        }
                     }
                     await ToggleEntitlementAsync(entId, parts[2]);
                     return;
@@ -427,15 +501,14 @@ internal class AdminPanelCommand(
 
     private async Task AddUserAsync(long id, string? displayName)
     {
-        if (users.Find(id) != null)
-        {
-            await LeaveAddAsync($"🟡 <code>{id}</code> è già configurato.");
-            return;
-        }
-
         try
         {
-            users.Upsert(new UserEntry { Id = id, Name = displayName });
+            userAdmin.Add(id, displayName, null, null);
+        }
+        catch (PanelConflictException ex)
+        {
+            await LeaveAddAsync($"🟡 {ex.Message}");
+            return;
         }
         catch (Exception ex)
         {
@@ -490,7 +563,15 @@ internal class AdminPanelCommand(
             return;
         }
 
-        var granted = user.Entitlements.Contains(normalized);
+        if (normalized == Entitlement.GateController && user.IsAdmin)
+        {
+            notice = "🟡 <b>gate_controller</b> è implicito nel ruolo admin.";
+            screen = Screen.User;
+            await RenderAsync();
+            return;
+        }
+
+        var granted = user.Entitlements.Contains(normalized, StringComparer.OrdinalIgnoreCase);
         if (granted && normalized == Entitlement.Admin && users.AdminIds().Length <= 1)
         {
             notice = "🔴 Non posso togliere i poteri all'ultimo amministratore.";
@@ -503,18 +584,18 @@ internal class AdminPanelCommand(
         else
             user.Entitlements.Add(normalized);
 
+        // A brand-new admin must not start muted: only fill an empty list, so an admin who
+        // already chose a subset keeps it.
+        if (!granted && normalized == Entitlement.Admin && user.Topics.Count == 0)
+            user.Topics = [.. NotificationTopic.All];
+
         if (!TrySave(user))
             return;
 
-        if (normalized == Entitlement.Admin)
-        {
-            if (granted)
-                await ForgetAdminScopeAsync(id);
-            else
-                await TrySetAdminScopeAsync(id);
-        }
-
-        notice = granted ? $"🟢 <code>{normalized}</code> rimosso." : $"🟢 <code>{normalized}</code> aggiunto.";
+        var icon = EntitlementIcon(normalized);
+        notice = granted
+            ? $"🟢 {icon} <b>{normalized}</b> rimosso."
+            : $"🟢 {icon} <b>{normalized}</b> attivato.";
         screen = Screen.User;
         await RenderAsync();
     }
@@ -538,7 +619,7 @@ internal class AdminPanelCommand(
             return;
         }
 
-        var subscribed = user.Topics.Contains(normalized);
+        var subscribed = user.Topics.Contains(normalized, StringComparer.OrdinalIgnoreCase);
         if (subscribed)
             user.Topics.RemoveAll(t => string.Equals(t, normalized, StringComparison.OrdinalIgnoreCase));
         else
@@ -547,7 +628,11 @@ internal class AdminPanelCommand(
         if (!TrySave(user))
             return;
 
-        notice = subscribed ? $"🟢 Iscrizione a <code>{normalized}</code> rimossa." : $"🟢 Iscritto a <code>{normalized}</code>.";
+        var icon = TopicIcon(normalized);
+        notice = subscribed
+            ? $"🟢 {icon} <b>{normalized}</b> disattivato."
+            : $"🟢 {icon} <b>{normalized}</b> attivato.";
+        screen = Screen.User;
         await RenderAsync();
     }
 
@@ -572,7 +657,14 @@ internal class AdminPanelCommand(
 
         try
         {
-            users.Remove(id);
+            userAdmin.Remove(id);
+        }
+        catch (PanelConflictException ex)
+        {
+            notice = $"🔴 {ex.Message}";
+            screen = Screen.User;
+            await RenderAsync();
+            return;
         }
         catch (Exception ex)
         {
@@ -582,9 +674,6 @@ internal class AdminPanelCommand(
             await RenderAsync();
             return;
         }
-
-        if (user.IsAdmin)
-            await ForgetAdminScopeAsync(id);
 
         selectedId = null;
         notice = $"🟢 <code>{id}</code> rimosso.";
@@ -596,8 +685,13 @@ internal class AdminPanelCommand(
     {
         try
         {
-            users.Upsert(user);
+            userAdmin.Update(user.Id, user.Name, user.Entitlements, user.Topics);
             return true;
+        }
+        catch (PanelConflictException ex)
+        {
+            notice = $"🔴 {ex.Message}";
+            return false;
         }
         catch (Exception ex)
         {
@@ -605,31 +699,6 @@ internal class AdminPanelCommand(
             notice = "🔴 Non sono riuscito a salvare la configurazione, guarda i log.";
             return false;
         }
-    }
-
-    private async Task TrySetAdminScopeAsync(long id)
-    {
-        try
-        {
-            await bot.TrySetAdminCommandsScope(id, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning("unable to set admin commands for {id}: {m}", id, ex.Message);
-        }
-    }
-
-    private async Task ForgetAdminScopeAsync(long id)
-    {
-        try
-        {
-            await bot.Client.DeleteMyCommands(scope: new BotCommandScopeChat() { ChatId = id });
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning("unable to clear admin commands for {id}: {m}", id, ex.Message);
-        }
-        bot.ForgetAdminCommandsScope(id);
     }
 
     private async Task<Dictionary<long, string>> ResolveNamesAsync(IReadOnlyList<UserEntry> entries)

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -51,13 +52,21 @@ public sealed class UserDirectoryTests
     }
 
     [Fact]
-    public void AdminImpliesEveryTopic()
+    public void AdminTopicsAreExplicit()
     {
         using var root = new TempRoot();
-        var users = Create(BuildConfig((1, [Entitlement.Admin], [])), root);
+        var users = Create(
+            BuildConfig(
+                (1, [Entitlement.Admin], [NotificationTopic.Heating]),
+                (2, [Entitlement.Admin], [])
+            ),
+            root
+        );
 
-        foreach (var topic in NotificationTopic.All)
-            Assert.True(users.IsSubscribed(1, topic));
+        Assert.True(users.IsSubscribed(1, NotificationTopic.Heating));
+        Assert.False(users.IsSubscribed(1, NotificationTopic.Gates));
+        Assert.False(users.IsSubscribed(1, NotificationTopic.Technical));
+        Assert.False(users.IsSubscribed(2, NotificationTopic.Heating));
     }
 
     [Fact]
@@ -123,19 +132,64 @@ public sealed class UserDirectoryTests
     }
 
     [Fact]
-    public void SubscribersIncludeAdmins()
+    public void SubscribersFollowExplicitTopics()
     {
         using var root = new TempRoot();
         var users = Create(
-            BuildConfig((1, [Entitlement.Admin], []), (2, [], [NotificationTopic.Heating])),
+            BuildConfig(
+                (1, [Entitlement.Admin], [NotificationTopic.Heating]),
+                (2, [], [NotificationTopic.Heating]),
+                (3, [], [NotificationTopic.Gates])
+            ),
             root
         );
 
-        var subscribers = users.Subscribers(NotificationTopic.Heating);
+        var heating = users.Subscribers(NotificationTopic.Heating);
+        var technical = users.Subscribers(NotificationTopic.Technical);
 
-        Assert.Contains(1L, subscribers);
-        Assert.Contains(2L, subscribers);
-        Assert.DoesNotContain(1L, users.Subscribers(NotificationTopic.Technical).Where(id => id == 2));
+        Assert.Equal([1L, 2L], heating);
+        Assert.Empty(technical);
+    }
+
+    [Fact]
+    public void LegacyAdminTopicsAreMaterialisedOnce()
+    {
+        using var root = new TempRoot();
+        var path = Path.Join(root.Environment.ContentRootPath, UserDirectory.RuntimeFileName);
+        File.WriteAllText(
+            path,
+            """
+            {
+              "Users": [
+                { "Id": 1, "Entitlements": ["admin"], "Topics": [] }
+              ],
+              "Removed": []
+            }
+            """
+        );
+
+        var first = Create(BuildConfig(), root);
+
+        foreach (var topic in NotificationTopic.All)
+            Assert.True(first.IsSubscribed(1, topic));
+
+        using (var document = JsonDocument.Parse(File.ReadAllText(path)))
+            Assert.Equal(UsersFile.CurrentVersion, document.RootElement.GetProperty("Version").GetInt32());
+
+        first.Upsert(
+            new UserEntry
+            {
+                Id = 1,
+                Entitlements = [Entitlement.Admin],
+                Topics = [NotificationTopic.Heating],
+            }
+        );
+
+        var second = Create(BuildConfig(), root);
+
+        Assert.True(second.IsSubscribed(1, NotificationTopic.Heating));
+        Assert.False(second.IsSubscribed(1, NotificationTopic.Gates));
+        Assert.False(second.IsSubscribed(1, NotificationTopic.Technical));
     }
 
     [Fact]

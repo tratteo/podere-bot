@@ -10,6 +10,7 @@ internal sealed class HeatingMonitorDaemon(
     HeatingDriver heatingDriver,
     ITemperatureDriver temperatureDriver,
     BotHostedService bot,
+    StartupGate startup,
     ILogger<HeatingMonitorDaemon> logger
 ) : BackgroundService
 {
@@ -23,8 +24,19 @@ internal sealed class HeatingMonitorDaemon(
         Math.Max(10, configuration.GetValue<int?>("Heating:TempSensorsToleranceSeconds") ?? 60)
     );
 
+    private readonly TimeSpan antifreezeNotifyCooldown = TimeSpan.FromMinutes(
+        Math.Max(0, configuration.GetValue<int?>("Heating:Antifreeze:NotifyCooldownMinutes") ?? 15)
+    );
+
     private bool? lastBoilerState;
+    private bool? lastLocalSensorOk;
+    private bool boilerInitialized;
+    private bool temperatureInitialized;
+    private bool localSensorInitialized;
+    private bool sensorsInitialized;
+    private bool suppressNextBoilerNotify;
     private DateTime? boilerOnSinceUtc;
+    private DateTime lastAntifreezeNotifyUtc = DateTime.MinValue;
     private bool boilerStuckNotified;
     private bool outOfBandNotified;
     private bool antifreezeNotified;
@@ -37,8 +49,9 @@ internal sealed class HeatingMonitorDaemon(
         {
             try
             {
-                await CheckBoilerAsync();
                 await CheckTemperatureAsync(stoppingToken);
+                await CheckBoilerAsync();
+                await CheckLocalSensorAsync(stoppingToken);
                 await CheckSensorsAsync();
             }
             catch (Exception ex)
@@ -51,6 +64,16 @@ internal sealed class HeatingMonitorDaemon(
     private async Task CheckBoilerAsync()
     {
         var active = heatingDriver.IsBoilerActive();
+        var suppress = suppressNextBoilerNotify;
+        suppressNextBoilerNotify = false;
+
+        if (!boilerInitialized)
+        {
+            boilerInitialized = true;
+            lastBoilerState = active;
+            boilerOnSinceUtc = active ? DateTime.UtcNow : null;
+            return;
+        }
 
         if (lastBoilerState != active)
         {
@@ -59,15 +82,20 @@ internal sealed class HeatingMonitorDaemon(
             {
                 boilerOnSinceUtc = DateTime.UtcNow;
                 boilerStuckNotified = false;
-                await bot.NotifyTopicAsync(NotificationTopic.Heating, "🔥 <b>Caldaia accesa</b>.");
+                if (startup.Ready && !suppress)
+                    await bot.NotifyTopicAsync(NotificationTopic.Heating, "🔥 <b>Caldaia accesa</b>.");
             }
             else
             {
                 boilerOnSinceUtc = null;
                 boilerStuckNotified = false;
-                await bot.NotifyTopicAsync(NotificationTopic.Heating, "❄️ <b>Caldaia spenta</b>.");
+                if (startup.Ready && !suppress)
+                    await bot.NotifyTopicAsync(NotificationTopic.Heating, "❄️ <b>Caldaia spenta</b>.");
             }
         }
+
+        if (!startup.Ready)
+            return;
 
         if (!active || boilerOnSinceUtc == null || boilerStuckNotified)
             return;
@@ -91,24 +119,51 @@ internal sealed class HeatingMonitorDaemon(
 
         var value = temperature.Value;
 
+        if (!temperatureInitialized)
+        {
+            temperatureInitialized = true;
+            antifreezeNotified = antifreeze.Enabled && HeatingPolicies.AntifreezeShouldEngage(value, antifreeze);
+            outOfBandNotified = HeatingPolicies.IsOutOfBand(value, band);
+            if (antifreezeNotified)
+                lastAntifreezeNotifyUtc = DateTime.UtcNow;
+            return;
+        }
+
+        if (!startup.Ready)
+        {
+            antifreezeNotified = antifreeze.Enabled && HeatingPolicies.AntifreezeShouldEngage(value, antifreeze);
+            outOfBandNotified = HeatingPolicies.IsOutOfBand(value, band);
+            return;
+        }
+
         if (antifreeze.Enabled)
         {
             var freezing = HeatingPolicies.AntifreezeShouldEngage(value, antifreeze);
             if (freezing && !antifreezeNotified)
             {
                 antifreezeNotified = true;
-                await bot.NotifyTopicAsync(
-                    NotificationTopic.Heating,
-                    $"🥶 <b>Antigelo attivo</b>: {value:0.0} °C, sotto la soglia di {antifreeze.ThresholdCelsius:0.0} °C. La caldaia resta accesa a prescindere dal programma."
-                );
+                suppressNextBoilerNotify = true;
+                if (DateTime.UtcNow - lastAntifreezeNotifyUtc >= antifreezeNotifyCooldown)
+                {
+                    lastAntifreezeNotifyUtc = DateTime.UtcNow;
+                    await bot.NotifyTopicAsync(
+                        NotificationTopic.Heating,
+                        $"🥶 <b>Antigelo attivo</b>: {value:0.0} °C, sotto la soglia di {antifreeze.ThresholdCelsius:0.0} °C. La caldaia resta accesa a prescindere dal programma."
+                    );
+                }
             }
             else if (!freezing && antifreezeNotified && HeatingPolicies.AntifreezeShouldRelease(value, antifreeze))
             {
                 antifreezeNotified = false;
-                await bot.NotifyTopicAsync(
-                    NotificationTopic.Heating,
-                    $"🌡️ <b>Antigelo disattivato</b>: {value:0.0} °C, sopra la soglia di {antifreeze.ThresholdCelsius:0.0} °C."
-                );
+                suppressNextBoilerNotify = true;
+                if (DateTime.UtcNow - lastAntifreezeNotifyUtc >= antifreezeNotifyCooldown)
+                {
+                    lastAntifreezeNotifyUtc = DateTime.UtcNow;
+                    await bot.NotifyTopicAsync(
+                        NotificationTopic.Heating,
+                        $"🌡️ <b>Antigelo disattivato</b>: {value:0.0} °C, sopra la soglia di {antifreeze.ThresholdCelsius:0.0} °C."
+                    );
+                }
             }
         }
 
@@ -138,6 +193,25 @@ internal sealed class HeatingMonitorDaemon(
         var fresh = temperatureDriver.GetExternalTemperatureReadings(sensorTolerance).Where(r => !r.Informational).ToList();
         var freshIds = fresh.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        if (!sensorsInitialized)
+        {
+            sensorsInitialized = true;
+            staleSensors.Clear();
+            foreach (var reading in known)
+                if (!freshIds.Contains(reading.Id))
+                    staleSensors.Add(reading.Id);
+            return;
+        }
+
+        if (!startup.Ready)
+        {
+            staleSensors.Clear();
+            foreach (var reading in known)
+                if (!freshIds.Contains(reading.Id))
+                    staleSensors.Add(reading.Id);
+            return;
+        }
+
         foreach (var reading in known)
         {
             if (freshIds.Contains(reading.Id))
@@ -163,6 +237,46 @@ internal sealed class HeatingMonitorDaemon(
             );
         }
     }
+
+    private async Task CheckLocalSensorAsync(CancellationToken stoppingToken)
+    {
+        var probe = await temperatureDriver.ProbeLocalTemperature(stoppingToken);
+        var ok = probe.Status == LocalTemperatureStatus.Ok;
+
+        if (!localSensorInitialized)
+        {
+            localSensorInitialized = true;
+            lastLocalSensorOk = ok;
+            return;
+        }
+
+        if (lastLocalSensorOk == ok)
+            return;
+        lastLocalSensorOk = ok;
+
+        if (!startup.Ready)
+            return;
+
+        if (ok)
+            await bot.NotifyTopicAsync(NotificationTopic.Technical, "✅ <b>Sensore locale tornato disponibile</b>.");
+        else
+            await bot.NotifyTopicAsync(
+                NotificationTopic.Technical,
+                $"⚠️ <b>Sensore locale non disponibile</b> · {TemperatureCause(probe.Status)}."
+            );
+    }
+
+    private static string TemperatureCause(LocalTemperatureStatus status) =>
+        status switch
+        {
+            LocalTemperatureStatus.DevicesRootMissing => "configurazione",
+            LocalTemperatureStatus.BusMasterMissing => "configurazione",
+            LocalTemperatureStatus.NoSensors => "hardware",
+            LocalTemperatureStatus.CrcError => "segnale",
+            LocalTemperatureStatus.ReadError => "hardware",
+            LocalTemperatureStatus.ParseError => "firmware",
+            _ => "ok",
+        };
 
     private static string Encode(string value) => System.Net.WebUtility.HtmlEncode(value);
 }

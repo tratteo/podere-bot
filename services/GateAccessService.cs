@@ -1,4 +1,5 @@
 using PodereBot.Services.Hosted;
+using PodereBot.Services.Panel;
 
 namespace PodereBot.Services;
 
@@ -65,6 +66,22 @@ internal sealed class GateAccessService(
         });
         logger.LogDebug("recorded gate use by {id} inside the shared window", userId);
     }
+
+    /// <summary>
+    /// The panel is not a chat: its synthetic id is recorded for the panel log but it must never
+    /// receive a notification, so the expiry daemon ignores it.
+    /// </summary>
+    public void RecordPanelUse()
+    {
+        if (!GateAccessPolicy.IsOpen(db.Data.GatesOpenAccessExpirationDate, DateTime.Now))
+            return;
+
+        db.Edit(d =>
+        {
+            if (!d.GateAccessUsers.Contains(PanelIdentity.UserId))
+                d.GateAccessUsers.Add(PanelIdentity.UserId);
+        });
+    }
 }
 
 /// <summary>Notifies the users who had access when the shared window expires, then closes it.</summary>
@@ -91,13 +108,14 @@ internal sealed class GateAccessExpiryDaemon(
                 if (!GateAccessPolicy.ShouldExpire(expiration, DateTime.Now))
                     continue;
 
-                var hadAccess = gateAccess.AccessLog();
+                var hadAccess = gateAccess.AccessLog().Where(id => id > 0).ToList();
                 gateAccess.CloseWindow();
 
                 if (hadAccess.Count > 0)
                 {
                     await bot.NotifyUsersAsync(
                         hadAccess,
+                        NotificationTopic.Gates,
                         "🔒 L'accesso ai cancelli è <b>scaduto</b>. Se ti serve di nuovo, chiedilo a un amministratore."
                     );
                 }

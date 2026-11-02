@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e0d">
+<title>PodereBot · Pairing</title>
+<link rel="stylesheet" href="styles.css?v=13">
+</head>
+<body class="gate-page">
+  <main class="gate-card">
+    <span class="brand-mark"></span>
+    <h1 id="title">Autorizzo il dispositivo…</h1>
+    <p class="gate-sub" id="message">Verifico il link monouso.</p>
+    <p class="form-error" id="error"></p>
+    <a class="btn primary" id="continue" href="/panel/" hidden>Entra nel pannello</a>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token') || '';
+    const title = document.getElementById('title');
+    const message = document.getElementById('message');
+    const error = document.getElementById('error');
+    const proceed = document.getElementById('continue');
+
+    async function pair() {
+      if (!token) {
+        title.textContent = 'Link incompleto';
+        message.textContent = 'Manca il codice di pairing. Chiedine uno nuovo dal pannello.';
+        return;
+      }
+
+      try {
+        const response = await fetch('/panel/api/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ token }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || 'Pairing non riuscito.');
+
+        title.textContent = 'Dispositivo autorizzato';
+        message.textContent = `Questo dispositivo è ora "${data.device}". Il link è stato consumato.`;
+        proceed.hidden = false;
+        setTimeout(() => location.replace('/panel/'), 1200);
+      } catch (e) {
+        title.textContent = 'Pairing non riuscito';
+        message.textContent = 'Il link potrebbe essere scaduto o già usato.';
+        error.textContent = e.message;
+      }
+    }
+
+    pair();
+  </script>
+</body>
+</html>

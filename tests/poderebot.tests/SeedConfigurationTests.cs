@@ -49,6 +49,8 @@ public sealed class SeedConfigurationTests
         {
             Assert.True(users.IsAdmin(id), $"user {id} is no longer an admin");
             Assert.True(users.CanControlGates(id), $"user {id} can no longer open the gates");
+            foreach (var topic in NotificationTopic.All)
+                Assert.True(users.IsSubscribed(id, topic), $"user {id} is not subscribed to {topic}");
         }
 
         Assert.Equal(legacyAdminIds.OrderBy(id => id), users.AdminIds().OrderBy(id => id));

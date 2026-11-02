@@ -21,6 +21,30 @@ internal sealed record GateRateLimitOptions(int MaxOpenings, int WindowMinutes)
     public static readonly GateRateLimitOptions Default = new(3, 10);
 }
 
+/// <summary>Local panel hosting: kiosk port is fixed, the LAN port and its policy are configurable.</summary>
+internal sealed record PanelOptions(
+    int LanPort,
+    string? LanHost,
+    bool AllowLan,
+    int PairingMinutes,
+    int SessionDays
+)
+{
+    public const int KioskPort = 5051;
+
+    public static readonly PanelOptions Default = new(5052, null, true, 10, 30);
+}
+
+internal sealed record PanelHistoryOptions(int SampleMinutes, int RetentionDays)
+{
+    public static readonly PanelHistoryOptions Default = new(5, 365);
+}
+
+internal sealed record PanelEventOptions(int RetentionDays, int MaxEntries)
+{
+    public static readonly PanelEventOptions Default = new(30, 500);
+}
+
 internal static class OptionsReader
 {
     public static AntifreezeOptions ReadAntifreeze(IConfiguration configuration)
@@ -55,6 +79,36 @@ internal static class OptionsReader
         return new GateRateLimitOptions(
             section.GetValue<int?>("MaxOpenings") ?? GateRateLimitOptions.Default.MaxOpenings,
             section.GetValue<int?>("WindowMinutes") ?? GateRateLimitOptions.Default.WindowMinutes
+        );
+    }
+
+    public static PanelOptions ReadPanel(IConfiguration configuration)
+    {
+        var section = configuration.GetSection("Panel");
+        return new PanelOptions(
+            section.GetValue<int?>("LanPort") ?? PanelOptions.Default.LanPort,
+            string.IsNullOrWhiteSpace(section.GetValue<string>("LanHost")) ? null : section.GetValue<string>("LanHost")!.Trim(),
+            section.GetValue<bool?>("AllowLan") ?? PanelOptions.Default.AllowLan,
+            Math.Max(1, section.GetValue<int?>("PairingMinutes") ?? PanelOptions.Default.PairingMinutes),
+            Math.Max(1, section.GetValue<int?>("SessionDays") ?? PanelOptions.Default.SessionDays)
+        );
+    }
+
+    public static PanelHistoryOptions ReadPanelHistory(IConfiguration configuration)
+    {
+        var section = configuration.GetSection("Panel:History");
+        return new PanelHistoryOptions(
+            Math.Max(1, section.GetValue<int?>("SampleMinutes") ?? PanelHistoryOptions.Default.SampleMinutes),
+            Math.Max(1, section.GetValue<int?>("RetentionDays") ?? PanelHistoryOptions.Default.RetentionDays)
+        );
+    }
+
+    public static PanelEventOptions ReadPanelEvents(IConfiguration configuration)
+    {
+        var section = configuration.GetSection("Panel:Events");
+        return new PanelEventOptions(
+            Math.Max(1, section.GetValue<int?>("RetentionDays") ?? PanelEventOptions.Default.RetentionDays),
+            Math.Max(1, section.GetValue<int?>("MaxEntries") ?? PanelEventOptions.Default.MaxEntries)
         );
     }
 }

@@ -39,7 +39,7 @@ internal static class Entitlement
     }
 }
 
-/// <summary>Notification topics a user can subscribe to. Admins receive every topic.</summary>
+/// <summary>Notification topics a user can subscribe to. Subscriptions are explicit for everyone.</summary>
 internal static class NotificationTopic
 {
     public const string Technical = "technical";
@@ -100,7 +100,7 @@ internal sealed class UserEntry
         Entitlements.Contains(entitlement, StringComparer.OrdinalIgnoreCase) || HasAdminOverride(entitlement);
 
     public bool IsSubscribed(string topic) =>
-        IsAdmin || Topics.Contains(topic, StringComparer.OrdinalIgnoreCase);
+        Topics.Contains(topic, StringComparer.OrdinalIgnoreCase);
 
     private bool HasAdminOverride(string entitlement) =>
         !string.Equals(entitlement, Entitlement.Admin, StringComparison.OrdinalIgnoreCase) &&
@@ -120,6 +120,12 @@ internal sealed class UserEntry
 
 internal sealed class UsersFile
 {
+    /// <summary>Bumped when the file semantics change; 0 means written before topics were explicit.</summary>
+    public const int CurrentVersion = 2;
+
+    [JsonPropertyName("Version")]
+    public int Version { get; set; }
+
     [JsonPropertyName("Users")]
     public List<UserEntry> Users { get; set; } = [];
 
@@ -298,7 +304,19 @@ internal sealed class UserDirectory
                 }
                 runtime = loaded;
                 removed = [.. file.Removed.Where(id => id > 0)];
-                lastWriteUtc = File.GetLastWriteTimeUtc(runtimePath);
+
+                // Before version 2 an admin implicitly received every topic, so an empty list
+                // meant "all". Materialise it once: from now on an empty list means "none".
+                if (file.Version < UsersFile.CurrentVersion)
+                {
+                    foreach (var admin in runtime.Values.Where(u => u.IsAdmin))
+                        admin.Topics = [.. NotificationTopic.All];
+                    SaveLocked();
+                }
+                else
+                {
+                    lastWriteUtc = File.GetLastWriteTimeUtc(runtimePath);
+                }
             }
             catch (Exception ex)
             {
@@ -311,6 +329,7 @@ internal sealed class UserDirectory
     {
         var file = new UsersFile
         {
+            Version = UsersFile.CurrentVersion,
             Users = [.. runtime.Values.OrderBy(u => u.Id).Select(u => u.Clone())],
             Removed = [.. removed.OrderBy(id => id)],
         };
@@ -342,7 +361,7 @@ internal sealed class UserDirectory
             var migrated = new Dictionary<long, UserEntry>();
             foreach (var id in ReadIds(root, "RuntimeAdmins"))
             {
-                migrated[id] = new UserEntry { Id = id, Entitlements = [Entitlement.Admin], Topics = [] };
+                migrated[id] = new UserEntry { Id = id, Entitlements = [Entitlement.Admin], Topics = [.. NotificationTopic.All] };
             }
 
             var migratedRemoved = ReadIds(root, "RemovedAdmins").ToHashSet();

@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Server;
 using System.ClientModel;
@@ -11,14 +13,18 @@ using PodereBot.Lib.Api;
 using PodereBot.Services;
 using PodereBot.Services.AiTools;
 using PodereBot.Services.Hosted;
+using PodereBot.Services.Panel;
 
 Console.Title = "Podere Bot";
 Console.WriteLine("========== Podere Bot ==========\n");
 
 DotNetEnv.Env.Load();
 var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.UseUrls("http://0.0.0.0:5050");
 builder.Configuration.AddEnvironmentVariables();
+var panelOptions = OptionsReader.ReadPanel(builder.Configuration);
+builder.WebHost.UseUrls(
+    $"http://0.0.0.0:5050;http://127.0.0.1:{PanelOptions.KioskPort};http://0.0.0.0:{panelOptions.LanPort}"
+);
 builder.Services.Configure<ConsoleLifetimeOptions>(options => options.SuppressStatusMessages = true);
 builder.Services.AddCommands();
 if (builder.Environment.IsDevelopment())
@@ -47,14 +53,27 @@ builder.Services.AddSingleton<HeatingDriver>();
 builder.Services.AddSingleton<Database>();
 builder.Services.AddSingleton<PendingInputRegistry>();
 builder.Services.AddSingleton<UserDirectory>();
+builder.Services.AddSingleton<StartupGate>();
 builder.Services.AddSingleton<ModelPricing>();
 builder.Services.AddSingleton<UsageTracker>();
 builder.Services.AddSingleton<GateAccessService>();
 builder.Services.AddSingleton<HealthService>();
 
+builder.Services.AddSingleton<PanelStore>();
+builder.Services.AddSingleton<NotificationLog>();
+builder.Services.AddSingleton<PanelDeviceService>();
+builder.Services.AddSingleton<HeatingControlService>();
+builder.Services.AddSingleton<GateControlService>();
+builder.Services.AddSingleton<HeatingStatusService>();
+builder.Services.AddSingleton<AdminScopeNotifier>();
+builder.Services.AddSingleton<UserAdminService>();
+builder.Services.AddSingleton<UpdateStateStore>();
+builder.Services.AddSingleton<PanelSnapshotService>();
+
 builder.Services.AddHostedService<HeatingProgramDaemon>();
 builder.Services.AddHostedService<HeatingMonitorDaemon>();
 builder.Services.AddHostedService<GateAccessExpiryDaemon>();
+builder.Services.AddHostedService<TemperatureHistoryRecorder>();
 
 builder.Services.AddSingleton<BotHostedService>();
 builder.Services.AddHostedService(p => p.GetRequiredService<BotHostedService>());
@@ -108,11 +127,54 @@ var app = builder.Build();
 
 app.Services.GetRequiredService<ModelPricing>();
 
-app.Use(Middleware.RestrictToLocalNetwork);
-
 var apiToken = builder.Configuration["API_TOKEN"];
 if (string.IsNullOrWhiteSpace(apiToken))
     apiToken = builder.Configuration["Api:Token"];
+
+// The panel is never served by the REST port: the kiosk reaches it on loopback, devices on the
+// dedicated LAN port. Everything else is a 404, not a redirect.
+app.Use(
+    async (context, next) =>
+    {
+        var path = context.Request.Path;
+        if (!path.StartsWithSegments("/panel"))
+        {
+            await next();
+            return;
+        }
+
+        var port = context.Connection.LocalPort;
+        if (port == panelOptions.LanPort)
+        {
+            if (!panelOptions.AllowLan)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+            context.Items[PanelContext.ModeItem] = "lan";
+        }
+        else if (port == PanelOptions.KioskPort)
+        {
+            var remote = context.Connection.RemoteIpAddress;
+            if (remote == null || !IPAddress.IsLoopback(remote))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+            context.Items[PanelContext.ModeItem] = "kiosk";
+        }
+        else
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        context.Response.Headers.CacheControl = "no-store";
+        await next();
+    }
+);
+
+app.Use(Middleware.RestrictToLocalNetwork);
 
 if (!string.IsNullOrWhiteSpace(apiToken))
 {
@@ -121,7 +183,12 @@ if (!string.IsNullOrWhiteSpace(apiToken))
         async (context, next) =>
         {
             var path = context.Request.Path;
-            if (path.StartsWithSegments("/api") || path.StartsWithSegments("/mcp"))
+            var protectedPath =
+                path.StartsWithSegments("/api")
+                || path.StartsWithSegments("/mcp")
+                || (path.StartsWithSegments("/panel/api") && context.Connection.LocalPort == PanelOptions.KioskPort);
+
+            if (protectedPath)
             {
                 var provided = context.Request.Headers["X-Api-Token"].ToString();
                 var candidate = Encoding.UTF8.GetBytes(provided);
@@ -139,10 +206,101 @@ if (!string.IsNullOrWhiteSpace(apiToken))
     );
 }
 
+// LAN devices authenticate with the HttpOnly cookie handed out by the one-time pairing link.
+// The pairing endpoint, the logout and the session probe are the only public panel API routes.
+var panelDevices = app.Services.GetRequiredService<PanelDeviceService>();
+app.Use(
+    async (context, next) =>
+    {
+        var path = context.Request.Path;
+        if (context.Connection.LocalPort != panelOptions.LanPort || !path.StartsWithSegments("/panel/api"))
+        {
+            await next();
+            return;
+        }
+
+        var isPublic =
+            path == "/panel/api/pair" || path == "/panel/api/whoami" || path == "/panel/api/logout";
+        if (isPublic)
+        {
+            await next();
+            return;
+        }
+
+        var session = panelDevices.Authenticate(context.Request.Cookies[PanelDeviceService.CookieName]);
+        if (session == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsJsonAsync(new { error = "Sessione del pannello non valida." });
+            return;
+        }
+        context.Items[PanelContext.SessionItem] = session;
+
+        var method = context.Request.Method;
+        if (!HttpMethods.IsGet(method) && !HttpMethods.IsHead(method) && !HttpMethods.IsOptions(method))
+        {
+            if (!string.Equals(context.Request.Headers["X-Panel"].ToString(), "1", StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+
+            var origin = context.Request.Headers.Origin.ToString();
+            if (
+                !string.IsNullOrWhiteSpace(origin)
+                && (
+                    !Uri.TryCreate(origin, UriKind.Absolute, out var originUri)
+                    || !string.Equals(originUri.Authority, context.Request.Host.Value, StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+        }
+
+        await next();
+    }
+);
+
+app.UseDefaultFiles();
+app.UseStaticFiles(
+    new StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+        {
+            if (ctx.Context.Request.Path.StartsWithSegments("/panel"))
+                ctx.Context.Response.Headers.CacheControl = "no-store";
+        },
+    }
+);
+
 app.UseApiEndpoints();
 app.MapMcp("/mcp");
 app.UseSwagger();
 app.UseSwaggerUI();
+
+// The kiosk needs the machine token to call the panel API; a LAN device never receives it.
+app.MapGet(
+    "/panel/config.js",
+    (HttpContext context, UpdateStateStore updates) =>
+    {
+        var mode = context.Items[PanelContext.ModeItem] as string ?? "lan";
+        var session =
+            mode == "lan"
+                ? panelDevices.Authenticate(context.Request.Cookies[PanelDeviceService.CookieName])
+                : PanelContext.Session(context);
+        var config = new
+        {
+            mode,
+            token = mode == "kiosk" ? apiToken : null,
+            version = updates.Version,
+            device = session?.Name,
+        };
+        var json = JsonSerializer.Serialize(config);
+        return Results.Text($"window.PANEL_CONFIG = {json};", "application/javascript; charset=utf-8");
+    }
+);
 
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 var loggerProvider = app.Services.GetRequiredService<ILoggerFactory>();

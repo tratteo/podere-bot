@@ -41,11 +41,18 @@ public sealed class HealthAndPrivilegeTests
     }
 
     [Fact]
-    public void HealthIsOkOnlyWhenTelegramAndDatabaseAreBothOk()
+    public void HealthIsOkWhenTheCoreIsHealthyEvenWithoutTelegram()
     {
-        Assert.True(new HealthReport(true, true, "ok", null).Ok);
-        Assert.False(new HealthReport(false, true, "ok", null).Ok);
-        Assert.False(new HealthReport(true, false, "ok", null).Ok);
+        // The local panel and the controls must stay healthy while Telegram is unreachable.
+        var healthy = new HealthReport(true, true, "ok", null);
+        var telegramDown = new HealthReport(false, true, "ok", null);
+        var databaseDown = new HealthReport(true, false, "ok", null);
+
+        Assert.True(healthy.Ok);
+        Assert.True(telegramDown.Ok);
+        Assert.True(telegramDown.CoreOk);
+        Assert.False(telegramDown.TelegramOk);
+        Assert.False(databaseDown.Ok);
         Assert.False(new HealthReport(false, false, "ok", null).Ok);
     }
 

@@ -80,6 +80,7 @@ internal record GetGatesResponse
 internal record GetHealthResponse
 {
     public bool Ok { get; init; }
+    public bool CoreOk { get; init; }
     public bool TelegramOk { get; init; }
     public bool DatabaseOk { get; init; }
     public string? Throttled { get; init; }
@@ -130,6 +131,7 @@ internal class Api : IEndpoint
         var body = new GetHealthResponse
         {
             Ok = report.Ok,
+            CoreOk = report.CoreOk,
             TelegramOk = report.TelegramOk,
             DatabaseOk = report.DatabaseOk,
             Throttled = report.Throttled,

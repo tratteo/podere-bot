@@ -6,12 +6,16 @@ namespace PodereBot.Services;
 
 internal sealed record HealthReport(bool TelegramOk, bool DatabaseOk, string? Throttled, double? CpuTemperatureCelsius)
 {
-    public bool Ok => TelegramOk && DatabaseOk;
+    /// <summary>The core is the local machine: HTTP and a writable database. Telegram is optional.</summary>
+    public bool CoreOk => DatabaseOk;
+
+    /// <summary>Watchdog and updater use this: a Telegram outage must not restart the bot.</summary>
+    public bool Ok => CoreOk;
 }
 
 /// <summary>
 /// Health signals used by the API and by the systemd watchdog: an HTTP port that answers is not
-/// enough, the Telegram connection and the database must be alive too.
+/// enough, the database must be alive too. Telegram is reported separately as a degraded state.
 /// </summary>
 internal sealed class HealthService(Database db, BotHostedService bot)
 {

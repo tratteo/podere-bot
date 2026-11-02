@@ -12,6 +12,10 @@ public class DatabaseSchema
     [JsonPropertyName("HeatingProgram")]
     public HeatingProgram? HeatingProgram { get; set; }
 
+    /// <summary>When the boiler was last switched on, so the panel can show how long it has run.</summary>
+    [JsonPropertyName("BoilerSinceUtc")]
+    public DateTime? BoilerSinceUtc { get; set; }
+
     [JsonIgnore]
     public bool BoilerActive { get; set; }
 
@@ -26,6 +30,7 @@ public class DatabaseSchema
         {
             GatesOpenAccessExpirationDate = GatesOpenAccessExpirationDate,
             HeatingProgram = HeatingProgram,
+            BoilerSinceUtc = BoilerSinceUtc,
             BoilerActive = BoilerActive,
             ManualHeatingActive = ManualHeatingActive,
             GateAccessUsers = [.. GateAccessUsers],

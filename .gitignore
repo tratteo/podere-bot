@@ -7,9 +7,15 @@ nupkg/
 .env
 users.json
 usage.json
+startup.json
+panel.db
+panel.db-wal
+panel.db-shm
 run.sh
 patch.sh
 update.sh
+panel.sh
+panel-pair.sh
 update-state.json
 .install-state
 .update.lock

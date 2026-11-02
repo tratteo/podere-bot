@@ -44,6 +44,13 @@ for bin in dotnet systemctl curl git; do
     fi
 done
 
+for bin in cage cog; do
+    if ! command -v "$bin" &> /dev/null; then
+        echo "missing the kiosk browser: sudo apt install cage cog"
+        exit 1
+    fi
+done
+
 if [ ! -f "$ROOT/PodereBot.csproj" ]; then
     echo "[$ROOT] does not look like the PodereBot repository"
     exit 1
@@ -93,6 +100,63 @@ cat > "$ROOT/run.sh" <<'EOF'
 # and appsettings.json, which must not be replaced together with the publish folder.
 cd "$(dirname "$0")"
 exec ./build/PodereBot
+EOF
+
+cat > "$ROOT/panel.sh" <<'EOF'
+#!/bin/bash
+# Kiosk launcher: waits for the panel on loopback, then hands the screen to cage + cog.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+URL="http://127.0.0.1:5051/panel/"
+
+for _ in $(seq 1 90); do
+    if curl -fsS -o /dev/null --max-time 2 "$URL"; then
+        break
+    fi
+    sleep 1
+done
+
+exec cage -- cog -P wl --scale=1 --device-scale=1 --webprocess-failure=restart -b '#0a0e0d' "$URL"
+EOF
+
+cat > "$ROOT/panel-pair.sh" <<'EOF'
+#!/bin/bash
+# Creates the first panel device without the HDMI screen and prints its single-use link.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+NAME="${1:-}"
+
+if [ -z "$NAME" ]; then
+    echo "usage: ./panel-pair.sh \"nome dispositivo\""
+    exit 1
+fi
+
+TOKEN=$(sed -n 's/^API_TOKEN=//p' "$ROOT/.env" 2>/dev/null | head -n1)
+ESCAPED=$(printf '%s' "$NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')
+BODY=$(printf '{"name":"%s"}' "$ESCAPED")
+
+if [ -n "$TOKEN" ]; then
+    RESPONSE=$(curl -fsS -X POST -H "Content-Type: application/json" -H "X-Api-Token: $TOKEN" -d "$BODY" http://127.0.0.1:5051/panel/api/devices/pair)
+else
+    RESPONSE=$(curl -fsS -X POST -H "Content-Type: application/json" -d "$BODY" http://127.0.0.1:5051/panel/api/devices/pair)
+fi
+
+URL=$(printf '%s' "$RESPONSE" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p')
+EXPIRES=$(printf '%s' "$RESPONSE" | sed -n 's/.*"expiresAt":"\([^"]*\)".*/\1/p')
+
+if [ -z "$URL" ]; then
+    echo "pairing failed: $RESPONSE"
+    exit 1
+fi
+
+echo "dispositivo: $NAME"
+echo "link monouso: $URL"
+if [ -n "$EXPIRES" ]; then
+    echo "scade: $EXPIRES"
+fi
+echo "apri il link sul dispositivo: il QR non viene mostrato da questo script."
 EOF
 
 cat > "$ROOT/patch.sh" <<'EOF'
@@ -147,7 +211,7 @@ sys stop poderebot.service || true
 trap 'sys start poderebot.service || true' EXIT
 
 echo - preserving runtime state from the previous build
-for runtime_file in db.json users.json usage.json; do
+for runtime_file in db.json users.json usage.json panel.db; do
     if [ -f "$REPO_DIR/build/$runtime_file" ] && [ ! -f "$REPO_DIR/$runtime_file" ]; then
         mv "$REPO_DIR/build/$runtime_file" "$REPO_DIR/$runtime_file"
         echo "  moved build/$runtime_file to $runtime_file"
@@ -227,7 +291,8 @@ units_hash() {
         /etc/systemd/system/poderebot-wd.service \
         /etc/systemd/system/poderebot-wd.timer \
         /etc/systemd/system/poderebot-update.service \
-        /etc/systemd/system/poderebot-update.timer 2>/dev/null | sha256sum | cut -d' ' -f1
+        /etc/systemd/system/poderebot-update.timer \
+        /etc/systemd/system/poderebot-kiosk.service 2>/dev/null | sha256sum | cut -d' ' -f1
 }
 
 health_ok() {
@@ -333,7 +398,7 @@ log "swapping the publish folder"
 rm -rf "$ROOT/build.old"
 mv "$ROOT/build" "$ROOT/build.old"
 mv "$ROOT/build.next" "$ROOT/build"
-for runtime_file in db.json users.json usage.json; do
+for runtime_file in db.json users.json usage.json panel.db; do
     if [ -f "$ROOT/build.old/$runtime_file" ] && [ ! -f "$ROOT/$runtime_file" ]; then
         mv "$ROOT/build.old/$runtime_file" "$ROOT/$runtime_file"
         log "preserved $runtime_file from the previous build"
@@ -372,8 +437,8 @@ wait_healthy || log "the service is still unhealthy after the rollback"
 finish "rolled-back" "$local_sha" "$remote_sha" "the new build did not become healthy" "$remote_sha" 1
 EOF
 
-chmod +x "$ROOT/run.sh" "$ROOT/patch.sh" "$ROOT/update.sh"
-chown "$user":"$user" "$ROOT/run.sh" "$ROOT/patch.sh" "$ROOT/update.sh"
+chmod +x "$ROOT/run.sh" "$ROOT/patch.sh" "$ROOT/update.sh" "$ROOT/panel.sh" "$ROOT/panel-pair.sh"
+chown "$user":"$user" "$ROOT/run.sh" "$ROOT/patch.sh" "$ROOT/update.sh" "$ROOT/panel.sh" "$ROOT/panel-pair.sh"
 
 echo - building distribution
 if systemctl is-active --quiet poderebot.service 2>/dev/null; then
@@ -381,7 +446,7 @@ if systemctl is-active --quiet poderebot.service 2>/dev/null; then
     systemctl stop poderebot.service
 fi
 echo - preserving runtime state from the previous build
-for runtime_file in db.json users.json usage.json; do
+for runtime_file in db.json users.json usage.json panel.db; do
     if [ -f "$ROOT/build/$runtime_file" ] && [ ! -f "$ROOT/$runtime_file" ]; then
         mv "$ROOT/build/$runtime_file" "$ROOT/$runtime_file"
         chown "$user":"$user" "$ROOT/$runtime_file"
@@ -479,6 +544,29 @@ Persistent=false
 WantedBy=timers.target
 EOF
 
+    echo - writing the touch panel kiosk unit
+    cat > /etc/systemd/system/poderebot-kiosk.service <<EOF
+[Unit]
+Description=PodereBot touch panel
+BindsTo=poderebot.service
+After=poderebot.service
+
+[Service]
+Type=simple
+User=$user
+WorkingDirectory=$ROOT
+Environment=XDG_RUNTIME_DIR=/run/poderebot-kiosk
+RuntimeDirectory=poderebot-kiosk
+RuntimeDirectoryMode=0700
+ExecStart=$ROOT/panel.sh
+Restart=always
+RestartSec=3
+Nice=5
+
+[Install]
+WantedBy=poderebot.service
+EOF
+
     echo - writing the restricted sudoers rule
     cat > /etc/sudoers.d/020-poderebot-update <<EOF
 $user ALL=(root) NOPASSWD: /usr/bin/systemctl stop poderebot.service, /usr/bin/systemctl start poderebot.service, /usr/bin/systemctl restart poderebot.service, /usr/bin/systemctl stop poderebot-wd.timer, /usr/bin/systemctl start poderebot-wd.timer, /usr/bin/systemctl restart poderebot-wd.timer
@@ -496,7 +584,7 @@ EOF
     echo - recording the installation fingerprint
     {
         echo "install_sha=$(sha256sum "$ROOT/install.sh" | cut -d' ' -f1)"
-        echo "units_sha=$(cat /etc/systemd/system/poderebot.service /etc/systemd/system/poderebot-wd.service /etc/systemd/system/poderebot-wd.timer /etc/systemd/system/poderebot-update.service /etc/systemd/system/poderebot-update.timer | sha256sum | cut -d' ' -f1)"
+        echo "units_sha=$(cat /etc/systemd/system/poderebot.service /etc/systemd/system/poderebot-wd.service /etc/systemd/system/poderebot-wd.timer /etc/systemd/system/poderebot-update.service /etc/systemd/system/poderebot-update.timer /etc/systemd/system/poderebot-kiosk.service | sha256sum | cut -d' ' -f1)"
         echo "installed_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "$ROOT/.install-state"
     chown "$user":"$user" "$ROOT/.install-state"
@@ -508,6 +596,7 @@ EOF
     systemctl enable poderebot-wd.service
     systemctl enable poderebot-wd.timer
     systemctl enable poderebot-update.timer
+    systemctl enable poderebot-kiosk.service
 
     if confirm "start systemd services?"; then
         echo - restarting services
@@ -522,4 +611,6 @@ echo - installation completed
 echo "  directory: $ROOT"
 echo "  update:    $ROOT/patch.sh (manual) / $ROOT/update.sh --check (dry run)"
 echo "  logs:      journalctl -u poderebot.service -f"
+echo "  panel:     http://127.0.0.1:5051/panel/ (kiosk) · journalctl -u poderebot-kiosk.service -f"
+echo "  pairing:   $ROOT/panel-pair.sh \"nome dispositivo\""
 echo "  autoupdate: journalctl -u poderebot-update.service -f, state in $ROOT/update-state.json"
