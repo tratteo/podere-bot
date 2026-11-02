@@ -280,6 +280,25 @@ app.MapMcp("/mcp");
 app.UseSwagger();
 app.UseSwaggerUI();
 
+// The pairing link and the login redirect are extensionless; serve the matching page while
+// keeping the query string intact, so the token reaches pair.html.
+app.MapGet(
+    "/panel/pair",
+    (IWebHostEnvironment env) =>
+        Results.File(
+            Path.GetFullPath(Path.Join(env.ContentRootPath, "wwwroot", "panel", "pair.html")),
+            "text/html; charset=utf-8"
+        )
+);
+app.MapGet(
+    "/panel/login",
+    (IWebHostEnvironment env) =>
+        Results.File(
+            Path.GetFullPath(Path.Join(env.ContentRootPath, "wwwroot", "panel", "login.html")),
+            "text/html; charset=utf-8"
+        )
+);
+
 // The kiosk needs the machine token to call the panel API; a LAN device never receives it.
 app.MapGet(
     "/panel/config.js",
