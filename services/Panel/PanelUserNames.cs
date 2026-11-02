@@ -16,14 +16,32 @@ internal sealed class PanelUserNames(BotHostedService bot, ILogger<PanelUserName
 
     private readonly ConcurrentDictionary<long, Entry> cache = new();
 
-    public async Task<string?> ResolveAsync(long id, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Never blocks a request on Telegram: a cache miss returns null immediately and the name is
+    /// fetched in the background, so a user toggle or a poll is not slowed down by GetChat.
+    /// </summary>
+    public Task<string?> ResolveAsync(long id, CancellationToken cancellationToken = default)
     {
-        if (cache.TryGetValue(id, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
-            return cached.Name;
+        var now = DateTime.UtcNow;
+        if (cache.TryGetValue(id, out var cached))
+        {
+            if (cached.ExpiresAt > now)
+                return Task.FromResult(cached.Name);
 
-        var name = await FetchAsync(id, cancellationToken);
+            cache[id] = new Entry(cached.Name, now.Add(FailureTtl));
+            _ = WarmAsync(id);
+            return Task.FromResult(cached.Name);
+        }
+
+        if (cache.TryAdd(id, new Entry(null, now.Add(FailureTtl))))
+            _ = WarmAsync(id);
+        return Task.FromResult<string?>(null);
+    }
+
+    private async Task WarmAsync(long id)
+    {
+        var name = await FetchAsync(id, CancellationToken.None);
         cache[id] = new Entry(name, DateTime.UtcNow.Add(name == null ? FailureTtl : SuccessTtl));
-        return name;
     }
 
     private async Task<string?> FetchAsync(long id, CancellationToken cancellationToken)
