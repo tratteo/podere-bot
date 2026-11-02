@@ -302,7 +302,7 @@ function temperatureShade(value) {
   const k = (v - from.at) / (to.at - from.at || 1);
   const tint = from.rgb.map((c, i) => c + (to.rgb[i] - c) * k);
   const base = [19, 23, 20];
-  const weight = 0.14;
+  const weight = 0.08;
   return `rgb(${tint.map((c, i) => Math.round(base[i] * (1 - weight) + c * weight)).join(',')})`;
 }
 
@@ -432,9 +432,9 @@ function renderHome() {
         </div>
         <div class="spark">${trend.length > 1 ? sparkline(trend) : '<div class="spark-empty">Storico in raccolta</div>'}</div>
         <div class="strip">
-          <div><span class="label">Caldaia</span><b>${h.boilerActive ? 'accesa' : 'spenta'}</b><span class="note">${h.boilerActive ? 'da ' + duration(h.boilerOnMinutes) : 'in attesa'}</span></div>
-          <div><span class="label">Antigelo</span><b>${fmt(h.antifreezeThreshold)} °C</b><span class="note">${h.antifreezeEnabled ? 'soglia attiva' : 'disattivato'}</span></div>
-          <div><span class="label">Sensori</span><b>${activeSensors} / ${sensors.length}</b><span class="note">${staleSensors ? `${staleSensors} in ritardo` : 'tutti ok'}</span></div>
+          <div><span class="label ${h.boilerActive ? 'hot' : ''}">${icon('flame')} Caldaia</span><b>${h.boilerActive ? 'accesa' : 'spenta'}</b><span class="note">${h.boilerActive ? 'da ' + duration(h.boilerOnMinutes) : 'in attesa'}</span></div>
+          <div><span class="label">${icon('snow')} Antigelo</span><b>${fmt(h.antifreezeThreshold)} °C</b><span class="note">${h.antifreezeEnabled ? 'soglia attiva' : 'disattivato'}</span></div>
+          <div><span class="label">${icon('wifi')} Sensori</span><b>${activeSensors} / ${sensors.length}</b><span class="note">${staleSensors ? `${staleSensors} in ritardo` : 'tutti ok'}</span></div>
         </div>
       </section>
 
@@ -511,7 +511,7 @@ function renderHeating() {
             <div class="trend-row"><span>Operativa · banda ${fmt(h.bandMin)}–${fmt(h.bandMax)} °C</span></div>
           </div>
           <div class="heating-state">
-            <span class="status-dot ${h.boilerActive ? 'on' : ''}"></span>
+            <span class="state-icon ${h.boilerActive ? 'on' : ''}">${icon('flame')}</span>
             <div class="heating-text"><b>Caldaia ${h.boilerActive ? 'accesa' : 'spenta'}</b><span>${mode} · ${h.boilerActive ? duration(h.boilerOnMinutes) : '--'}</span></div>
           </div>
         </div>
@@ -658,10 +658,10 @@ function renderSystem() {
   document.getElementById('system-view').innerHTML = `
     <div class="stack">
       <div class="health-grid">
-        <div class="stat"><div class="kicker">Telegram</div><b style="color:${health.telegramOk ? 'var(--green)' : 'var(--amber)'}">${health.telegramOk ? 'Connesso' : 'Non connesso'}</b><span>${health.telegramOk ? 'heartbeat attivo' : 'il bot resta operativo in locale'}</span></div>
-        <div class="stat"><div class="kicker">Database</div><b style="color:${health.databaseOk ? 'var(--green)' : 'var(--red)'}">${health.databaseOk ? 'Scrivibile' : 'Non scrivibile'}</b><span>db.json · registro ${health.panelStoreOk ? 'ok' : 'non disponibile'}</span></div>
-        <div class="stat"><div class="kicker">CPU</div><b>${health.cpuTemperatureCelsius ? fmt(health.cpuTemperatureCelsius) + ' °C' : '—'}</b><span>throttled: ${esc(health.throttled || 'sconosciuto')}</span></div>
-        <div class="stat"><div class="kicker">Uptime</div><b>${uptime(o.system.uptimeSeconds)}</b><span>versione ${esc(o.system.version)}</span></div>
+        <div class="stat"><div class="kicker">${icon('activity')} Telegram</div><b style="color:${health.telegramOk ? 'var(--green)' : 'var(--amber)'}">${health.telegramOk ? 'Connesso' : 'Non connesso'}</b><span>${health.telegramOk ? 'heartbeat attivo' : 'il bot resta operativo in locale'}</span></div>
+        <div class="stat"><div class="kicker">${icon('db')} Database</div><b style="color:${health.databaseOk ? 'var(--green)' : 'var(--red)'}">${health.databaseOk ? 'Scrivibile' : 'Non scrivibile'}</b><span>db.json · registro ${health.panelStoreOk ? 'ok' : 'non disponibile'}</span></div>
+        <div class="stat"><div class="kicker">${icon('cpu')} CPU</div><b>${health.cpuTemperatureCelsius ? fmt(health.cpuTemperatureCelsius) + ' °C' : '—'}</b><span>throttled: ${esc(health.throttled || 'sconosciuto')}</span></div>
+        <div class="stat"><div class="kicker">${icon('clock')} Uptime</div><b>${uptime(o.system.uptimeSeconds)}</b><span>versione ${esc(o.system.version)}</span></div>
       </div>
 
       <section class="card">

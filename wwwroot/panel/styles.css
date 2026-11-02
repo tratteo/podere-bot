@@ -753,9 +753,20 @@ button {
 }
 
 .strip .label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   color: var(--muted);
+}
+
+.strip .label .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.strip .label.hot {
+  color: var(--amber);
 }
 
 .strip b {
@@ -1260,6 +1271,17 @@ button {
   margin-top: 4px;
   font-size: 16px;
   font-weight: 600;
+}
+
+.stat .kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat .kicker .icon {
+  width: 14px;
+  height: 14px;
 }
 
 .stat span {
