@@ -115,6 +115,8 @@ CSharpier (`.csharpierrc.json`): printWidth 140, tabWidth 4, no tabs.
 
 Systemd watchdog polls `GET /api/health` every 10 minutes; restarts the service if it fails. It passes `X-Api-Token` when `API_TOKEN` is set in `.env`.
 
+`uninstall.sh` removes the six systemd units with their drop-ins, the updater sudoers rule, the generated scripts and `build/`. `--purge` also deletes `.env` and the runtime files, `--delete-repo` removes the checkout, `--dry-run` prints the actions. It never removes `cage`, `cog` or the system user.
+
 ## Runtime state location
 
 `db.json`, `users.json`, `usage.json`, `panel.db` and `startup.json` live at `IHostEnvironment.ContentRootPath`, which is the repository root because `run.sh` starts the app from there. The first start migrates a copy found inside the publish folder (`build/`), so replacing the publish folder on update never destroys runtime state.
