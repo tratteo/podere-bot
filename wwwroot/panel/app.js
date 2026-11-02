@@ -1448,7 +1448,6 @@ function openMore() {
 async function setBoiler(on) {
   const h = heating();
   if (!h || on === boilerOn()) return;
-  state.boilerPending = on;
   await optimistic({
     pending: on ? 'Accendo la caldaia…' : 'Spengo la caldaia…',
     apply: () => {
