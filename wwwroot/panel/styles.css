@@ -1850,6 +1850,29 @@ button {
   height: 20px;
 }
 
+.abadge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  border-radius: 8px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  vertical-align: middle;
+}
+
+.abadge .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.ul .abadge {
+  color: var(--amber);
+}
+
 .avatar {
   display: flex;
   flex: none;
@@ -2236,6 +2259,11 @@ button {
 
 .toast.error .icon {
   color: var(--red);
+}
+
+.toast.loading .icon {
+  color: var(--muted);
+  animation: spin 0.9s linear infinite;
 }
 
 .toast span {

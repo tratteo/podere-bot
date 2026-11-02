@@ -16,7 +16,7 @@ internal record PostTemperatureBody
     [Required]
     public float? Temperature { get; init; }
 
-    [Required]
+    /// <summary>Unix seconds. Optional: a sensor without NTP falls back to the server clock.</summary>
     public long? Timestamp { get; init; }
 
     [Required]
@@ -100,7 +100,9 @@ internal class Api : IEndpoint
             {
                 Id = body.SensorId ?? "",
                 Temperature = (float)body.Temperature!,
-                Timestamp = new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc).AddSeconds((int)body.Timestamp!),
+                Timestamp = body.Timestamp is > 0
+                    ? DateTime.UnixEpoch.AddSeconds(body.Timestamp.Value)
+                    : DateTime.UtcNow,
                 Location = body.Location!,
                 Informational = body.Informational,
             }

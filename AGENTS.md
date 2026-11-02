@@ -51,7 +51,7 @@ All endpoints are restricted to local network (192.168.x.x, 127.0.0.1). Binds to
 | GET | `/api/temperatures` | Local probe, external readings and the operational average |
 | GET | `/api/heating` | Operative temperature, boiler state, program intervals, antifreeze threshold |
 | GET | `/api/gates` | Access window, users who had access, rate limit settings |
-| POST | `/api/temperature` | Accept external sensor readings |
+| POST | `/api/temperature` | Accept external sensor readings (missing `timestamp` falls back to the server UTC clock) |
 
 API endpoints auto-register via `IEndpoint` reflection (same pattern as commands). `install.sh` generates `API_TOKEN` into `.env` when missing, so on a real deployment every `/api/*` and `/mcp` request must send it in the `X-Api-Token` header (compared in constant time); the watchdog reads the same value. Clearing the value disables the requirement and leaves the local-network restriction as the only guard.
 
@@ -67,7 +67,7 @@ User names in the panel come from `users.json` when set, otherwise from Telegram
 
 `panel.db` (SQLite, `Microsoft.Data.Sqlite`, WAL) holds `temperature_hourly`, `events` and `panel_devices`. `TemperatureHistoryRecorder` samples the operational temperature every `Panel:History:SampleMinutes` (5), folds it into the UTC hour with average/min/max/samples, and prunes history to `RetentionDays` (365) daily. `NotificationLog` records every notification before the Telegram send and keeps `Panel:Events:MaxEntries` (500) entries for `RetentionDays` (30). Panel actions are audit events with topic `panel`.
 
-The panel UI is monochrome (white on black or black on white); colour is reserved for icons, states and badges. Theme (`Automatico`/`Scuro`/`Chiaro`), animations (`Complete`/`Ridotte`) and the idle screen delay are per-device preferences in `localStorage` (`pb.theme`, `pb.motion`, `pb.idle`), set in Sistema › Aspetto. `app.js` morphs the view in place on every poll instead of replacing it, so transitions and running animations survive; elements marked `data-keep` belong to script (the animated temperature). The blob behind the temperature is two radial gradients animated only with `transform` (no `filter: blur`), coloured by the operative temperature: flat blue up to 10 °C, then 15, 18, 20, 24, 28 °C stops.
+The panel UI is monochrome (white on black or black on white); colour is reserved for icons, states and badges. Theme (`Automatico`/`Scuro`/`Chiaro`), animations (`Complete`/`Ridotte`) and the idle screen delay are per-device preferences in `localStorage` (`pb.theme`, `pb.motion`, `pb.idle`), set in Sistema › Aspetto. `app.js` morphs the view in place on every poll instead of replacing it, so transitions and running animations survive; elements marked `data-keep` belong to script (the animated temperature). Every write goes through `optimistic()`: it snapshots the overview, applies the change locally, shows a loading toast, then reconciles with the server overview or, on failure, restores the snapshot and refreshes. The blob behind the temperature is two radial gradients animated only with `transform` (no `filter: blur`), coloured by the operative temperature: flat blue up to 10 °C, then 15, 18, 20, 24, 28 °C stops.
 
 Outdoor weather comes from Open-Meteo (`WeatherService`, no key) for the `Home` coordinates, refreshed every `Weather:RefreshMinutes` (15) and exposed as `weather` in the panel overview; a failed refresh keeps the last reading. `/sendpos` reads the same `Home` section. A future outdoor sensor should take precedence over it.
 

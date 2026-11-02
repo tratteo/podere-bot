@@ -213,6 +213,49 @@ async function write(path, options) {
   return result;
 }
 
+/**
+ * Optimistic write: the UI is updated first, the request runs in the background, and a failed
+ * request reconciles from the server. The toast shows a loading state until the outcome.
+ */
+async function optimistic({ pending, apply, request, success, failure }) {
+  const before = state.overview
+    ? typeof structuredClone === 'function'
+      ? structuredClone(state.overview)
+      : JSON.parse(JSON.stringify(state.overview))
+    : null;
+
+  if (apply && state.overview) {
+    apply(state.overview);
+    render();
+  }
+  if (pending) toast(pending, 'loading');
+
+  try {
+    const result = await request();
+    if (result && result.overview) {
+      applyOverview(result.overview);
+      render();
+      if (state.view === 'events') loadEvents();
+    }
+    if (success) toast(success, 'ok');
+    else hideToast();
+    return result;
+  } catch (error) {
+    if (before) {
+      state.overview = before;
+      render();
+    }
+    try {
+      await refresh();
+    } catch (e) {
+      /* keep the snapshot when the server is unreachable too */
+    }
+    if (failure) failure(error);
+    toast(error.message || 'Errore', 'error');
+    return null;
+  }
+}
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /* ---------- helpers ---------- */
@@ -723,16 +766,24 @@ function programSummary() {
   return 'Programma concluso per oggi';
 }
 
+function programHours(intervals) {
+  const minutes = (intervals || []).reduce((sum, i) => sum + Math.max(0, i.to - i.from), 0);
+  if (!minutes) return '0 h';
+  const hours = minutes / 60;
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h`;
+}
+
 function programSub() {
   const h = heating();
   const count = h.program.intervals.length;
   if (!count) return 'Nessuna fascia: tocca Modifica per crearne una';
-  if (h.program.suspended) return `${plural(count, 'fascia', 'fasce')} · sospeso`;
+  const total = programHours(h.program.intervals);
+  if (h.program.suspended) return `${plural(count, 'fascia', 'fasce')} · ${total} totali · sospeso`;
   const next = nextChange();
-  if (!next) return `${plural(count, 'fascia', 'fasce')} · concluso per oggi`;
+  if (!next) return `${plural(count, 'fascia', 'fasce')} · ${total} totali · concluso per oggi`;
   return next.kind === 'end'
-    ? `${plural(count, 'fascia', 'fasce')} · alle ${minutesToTime(next.at)} si spegne`
-    : `${plural(count, 'fascia', 'fasce')} · alle ${minutesToTime(next.at)} si accende a ${fmt(next.temp)}°`;
+    ? `${plural(count, 'fascia', 'fasce')} · ${total} totali · alle ${minutesToTime(next.at)} si spegne`
+    : `${plural(count, 'fascia', 'fasce')} · ${total} totali · alle ${minutesToTime(next.at)} si accende a ${fmt(next.temp)}°`;
 }
 
 function heatingModeLine() {
@@ -950,6 +1001,7 @@ function userRow(u) {
   return `<button class="ul ${u.id === state.selectedUser ? 'on' : ''}" data-action="select-user" data-user="${u.id}">
     <span class="avatar">${u.name ? esc(initials(u.name)) : icon('user')}</span>
     <span class="grow"><b>${esc(userLabel(u))}</b><span>${role.label} · ${subscriptions}</span></span>
+    ${u.isAdmin ? `<span class="abadge" title="Admin" aria-label="Admin">${icon('shield')}</span>` : ''}
     <span class="chev">${icon('chevron')}</span>
   </button>`;
 }
@@ -961,7 +1013,7 @@ function userDetail(u) {
   return `<div class="head">
       <div class="row grow">
         <span class="avatar lg">${u.name ? esc(initials(u.name)) : icon('user')}</span>
-        <div class="grow"><div class="title">${esc(userLabel(u))}</div><div class="sub mono" style="font-size:15px">${u.name ? 'ID ' + u.id : 'Nome Telegram non disponibile'}</div></div>
+        <div class="grow"><div class="title">${esc(userLabel(u))}${u.isAdmin ? `<span class="abadge" title="Admin" aria-label="Admin">${icon('shield')}</span>` : ''}</div><div class="sub mono" style="font-size:15px">${u.name ? 'ID ' + u.id : 'Nome Telegram non disponibile'}</div></div>
       </div>
       <div class="actions-inline">
         <button class="btn s g square" data-action="edit-name" data-user="${u.id}" aria-label="Modifica il nome di ${esc(userLabel(u))}">${icon('edit')}</button>
@@ -1280,16 +1332,24 @@ function toast(message, tone = 'ok') {
   clearTimeout(toastTimer);
   clearTimeout(toastHide);
   $('toast-text').textContent = message;
-  $('toast-icon').innerHTML = `<use href="#i-${tone === 'error' ? 'alert' : 'check'}"></use>`;
+  const iconName = tone === 'error' ? 'alert' : tone === 'loading' ? 'loader' : 'check';
+  $('toast-icon').innerHTML = `<use href="#i-${iconName}"></use>`;
   el.classList.toggle('error', tone === 'error');
+  el.classList.toggle('loading', tone === 'loading');
   el.hidden = false;
   requestAnimationFrame(() => el.classList.add('show'));
-  toastTimer = setTimeout(() => {
-    el.classList.remove('show');
-    toastHide = setTimeout(() => {
-      el.hidden = true;
-    }, 400);
-  }, 2600);
+  toastTimer = setTimeout(hideToast, tone === 'loading' ? 20000 : 2600);
+}
+
+function hideToast() {
+  clearTimeout(toastTimer);
+  clearTimeout(toastHide);
+  const el = $('toast');
+  el.classList.remove('show');
+  toastHide = setTimeout(() => {
+    el.hidden = true;
+    el.classList.remove('loading', 'error');
+  }, 400);
 }
 
 function isSheetOpen() {
@@ -1389,25 +1449,30 @@ async function setBoiler(on) {
   const h = heating();
   if (!h || on === boilerOn()) return;
   state.boilerPending = on;
-  render();
-  try {
-    await write(on ? '/heating/on' : '/heating/off', { method: 'POST' });
-    toast(on ? 'Caldaia accesa' : 'Caldaia spenta');
-  } catch (error) {
-    toast(error.message, 'error');
-  }
+  await optimistic({
+    pending: on ? 'Accendo la caldaia…' : 'Spengo la caldaia…',
+    apply: () => {
+      state.boilerPending = on;
+    },
+    request: () => write(on ? '/heating/on' : '/heating/off', { method: 'POST' }),
+    success: on ? 'Caldaia accesa' : 'Caldaia spenta',
+  });
   state.boilerPending = null;
   render();
 }
 
 async function toggleSuspend() {
   const h = heating();
-  try {
-    await write('/heating/suspended', { method: 'PUT', body: { suspended: !h.program.suspended } });
-    toast(h.program.suspended ? 'Programma ripreso' : 'Programma sospeso');
-  } catch (error) {
-    toast(error.message, 'error');
-  }
+  if (!h) return;
+  const suspended = !h.program.suspended;
+  await optimistic({
+    pending: suspended ? 'Sospendo il programma…' : 'Riprendo il programma…',
+    apply: (overview) => {
+      overview.heating.program.suspended = suspended;
+    },
+    request: () => write('/heating/suspended', { method: 'PUT', body: { suspended } }),
+    success: suspended ? 'Programma sospeso' : 'Programma ripreso',
+  });
 }
 
 function confirmDeleteProgram() {
@@ -1417,12 +1482,14 @@ function confirmDeleteProgram() {
     label: 'Rimuovi',
     danger: true,
     onConfirm: async () => {
-      try {
-        await write('/heating/program', { method: 'DELETE' });
-        toast('Programma rimosso');
-      } catch (error) {
-        toast(error.message, 'error');
-      }
+      await optimistic({
+        pending: 'Rimuovo il programma…',
+        apply: (overview) => {
+          overview.heating.program = { suspended: false, hasProgram: false, intervals: [] };
+        },
+        request: () => write('/heating/program', { method: 'DELETE' }),
+        success: 'Programma rimosso',
+      });
     },
   });
 }
@@ -1500,9 +1567,22 @@ async function saveProgram() {
   }
 
   try {
-    await write('/heating/program', { method: 'PUT', body: { intervals } });
-    closeSheet();
-    toast('Programma aggiornato');
+    const result = await optimistic({
+      pending: 'Applico il programma…',
+      apply: (overview) => {
+        overview.heating.program = {
+          suspended: false,
+          hasProgram: true,
+          intervals: intervals.map((i) => ({ from: i.from, to: i.to, temperature: i.temperature })),
+        };
+      },
+      request: () => write('/heating/program', { method: 'PUT', body: { intervals } }),
+      success: 'Programma aggiornato',
+      failure: (e) => {
+        error.textContent = e.message;
+      },
+    });
+    if (result) closeSheet();
   } catch (e) {
     error.textContent = e.message;
   }
@@ -1585,51 +1665,63 @@ async function openGate(gate) {
   state.gateAnim = { gate, phase: 'opening' };
   render();
   const started = Date.now();
-  try {
-    await write('/gates/open', { method: 'POST', body: { gate } });
+  const result = await optimistic({
+    pending: `Apro il cancello ${gateName(gate)}…`,
+    request: () => write('/gates/open', { method: 'POST', body: { gate } }),
+    success: `Cancello ${gateName(gate)} aperto`,
+  });
+  if (result) {
     await wait(Math.max(0, GATE_OPEN_MS - (Date.now() - started)));
     state.gateAnim = { gate, phase: 'done' };
     render();
-    toast(`Cancello ${gateName(gate)} aperto`);
     await wait(GATE_DONE_MS);
-  } catch (error) {
-    toast(error.message, 'error');
   }
   state.gateAnim = null;
   render();
 }
 
 async function openWindow(hours) {
-  try {
-    await write('/gates/window', { method: 'PUT', body: { hours } });
-    toast(`Cancelli sbloccati per ${hours} h`);
-  } catch (error) {
-    toast(error.message, 'error');
-  }
+  await optimistic({
+    pending: `Sblocco i cancelli per ${hours} h…`,
+    apply: (overview) => {
+      const now = nowMs();
+      overview.gates.open = true;
+      overview.gates.openedAt = new Date(now).toISOString();
+      overview.gates.expiresAt = new Date(now + hours * 3600000).toISOString();
+    },
+    request: () => write('/gates/window', { method: 'PUT', body: { hours } }),
+    success: `Cancelli sbloccati per ${hours} h`,
+  });
 }
 
 async function lockGates() {
-  try {
-    await write('/gates/window', { method: 'DELETE' });
-    toast('Cancelli bloccati');
-  } catch (error) {
-    toast(error.message, 'error');
-  }
+  await optimistic({
+    pending: 'Blocco i cancelli…',
+    apply: (overview) => {
+      overview.gates.open = false;
+      overview.gates.openedAt = null;
+      overview.gates.expiresAt = null;
+    },
+    request: () => write('/gates/window', { method: 'DELETE' }),
+    success: 'Cancelli bloccati',
+  });
 }
 
 async function triggerLights() {
   if (lightsLit()) return;
-  state.lightsUntil = Date.now() + LIGHTS_MS;
-  render();
+  const until = Date.now() + LIGHTS_MS;
   setTimeout(render, LIGHTS_MS + 50);
-  try {
-    await write('/gates/lights', { method: 'POST' });
-    toast('Luci esterne accese');
-  } catch (error) {
-    state.lightsUntil = 0;
-    render();
-    toast(error.message, 'error');
-  }
+  await optimistic({
+    pending: 'Accendo le luci…',
+    apply: () => {
+      state.lightsUntil = until;
+    },
+    request: () => write('/gates/lights', { method: 'POST' }),
+    success: 'Luci esterne accese',
+    failure: () => {
+      state.lightsUntil = 0;
+    },
+  });
 }
 
 /* ---------- user actions ---------- */
@@ -1700,15 +1792,32 @@ async function saveUser() {
   const role = document.querySelector('#sheet [data-action="form-role"].on')?.dataset.role || 'user';
   const topics = Array.from(document.querySelectorAll('#sheet [data-action="form-switch"][aria-checked="true"]')).map((s) => s.dataset.topic);
   const name = $('new-user-name').value.trim();
+  const entitlements = entitlementsFor(null, role);
 
-  try {
-    await write('/users', { method: 'POST', body: { id, name, entitlements: entitlementsFor(null, role), topics } });
+  const result = await optimistic({
+    pending: 'Aggiungo l’utente…',
+    apply: (overview) => {
+      overview.users.push({
+        id,
+        name: name || null,
+        username: null,
+        entitlements,
+        topics,
+        isAdmin: entitlements.includes('admin'),
+        isGateController: entitlements.includes('admin') || entitlements.includes('gate_controller'),
+      });
+    },
+    request: () => write('/users', { method: 'POST', body: { id, name, entitlements, topics } }),
+    success: 'Utente aggiunto',
+    failure: (e) => {
+      error.textContent = e.message;
+    },
+  });
+
+  if (result) {
     state.selectedUser = id;
     closeSheet();
     render();
-    toast('Utente aggiunto');
-  } catch (e) {
-    error.textContent = e.message;
   }
 }
 
@@ -1734,29 +1843,43 @@ async function saveName() {
   error.textContent = '';
   const user = findUser(Number(input.dataset.user));
   if (!user) return;
-  try {
-    await write('/users/' + user.id, { method: 'PATCH', body: { name: input.value.trim(), entitlements: user.entitlements, topics: user.topics } });
-    closeSheet();
-    toast('Nome aggiornato');
-  } catch (e) {
-    error.textContent = e.message;
-  }
+  const name = input.value.trim();
+  const result = await optimistic({
+    pending: 'Salvo il nome…',
+    apply: (overview) => {
+      const target = overview.users.find((u) => u.id === user.id);
+      if (target) target.name = name || null;
+    },
+    request: () => write('/users/' + user.id, { method: 'PATCH', body: { name, entitlements: user.entitlements, topics: user.topics } }),
+    success: 'Nome aggiornato',
+    failure: (e) => {
+      error.textContent = e.message;
+    },
+  });
+  if (result) closeSheet();
 }
 
 async function patchUser(user, changes, message) {
-  const before = { entitlements: [...user.entitlements], topics: [...user.topics], isAdmin: user.isAdmin, isGateController: user.isGateController };
-  Object.assign(user, changes);
-  user.isAdmin = user.entitlements.includes('admin');
-  user.isGateController = user.isAdmin || user.entitlements.includes('gate_controller');
-  render();
-  try {
-    await write('/users/' + user.id, { method: 'PATCH', body: { name: user.name, entitlements: user.entitlements, topics: user.topics } });
-    toast(message);
-  } catch (error) {
-    Object.assign(user, before);
-    render();
-    toast(error.message, 'error');
-  }
+  await optimistic({
+    pending: 'Applico le modifiche…',
+    apply: (overview) => {
+      const target = overview.users.find((u) => u.id === user.id);
+      if (!target) return;
+      Object.assign(target, changes);
+      target.isAdmin = target.entitlements.includes('admin');
+      target.isGateController = target.isAdmin || target.entitlements.includes('gate_controller');
+    },
+    request: () =>
+      write('/users/' + user.id, {
+        method: 'PATCH',
+        body: {
+          name: user.name,
+          entitlements: changes.entitlements || user.entitlements,
+          topics: changes.topics || user.topics,
+        },
+      }),
+    success: message,
+  });
 }
 
 async function setRole(userId, role) {
@@ -1791,14 +1914,15 @@ function confirmRemoveUser(userId) {
     label: 'Rimuovi',
     danger: true,
     onConfirm: async () => {
-      try {
-        await write('/users/' + userId, { method: 'DELETE' });
-        if (state.selectedUser === userId) state.selectedUser = null;
-        render();
-        toast('Utente rimosso');
-      } catch (error) {
-        toast(error.message, 'error');
-      }
+      await optimistic({
+        pending: 'Rimuovo l’utente…',
+        apply: (overview) => {
+          overview.users = overview.users.filter((u) => u.id !== userId);
+          if (state.selectedUser === userId) state.selectedUser = null;
+        },
+        request: () => write('/users/' + userId, { method: 'DELETE' }),
+        success: 'Utente rimosso',
+      });
     },
   });
 }
@@ -1822,23 +1946,21 @@ async function createDevice(id) {
   const error = $('device-error');
   if (!error) return;
   error.textContent = '';
-  try {
-    let ticket;
-    if (id) {
-      ticket = await api('/devices/' + id + '/pair', { method: 'POST' });
-    } else {
-      const name = $('device-name').value.trim();
-      if (!name) {
-        error.textContent = 'Il nome è obbligatorio.';
-        return;
-      }
-      ticket = await api('/devices/pair', { method: 'POST', body: { name } });
-    }
-    showPairing(ticket);
-    loadDevices();
-  } catch (e) {
-    error.textContent = e.message;
+  const name = id ? null : $('device-name').value.trim();
+  if (!id && !name) {
+    error.textContent = 'Il nome è obbligatorio.';
+    return;
   }
+  const ticket = await optimistic({
+    pending: 'Genero il link…',
+    request: () => (id ? api('/devices/' + id + '/pair', { method: 'POST' }) : api('/devices/pair', { method: 'POST', body: { name } })),
+    failure: (e) => {
+      error.textContent = e.message;
+    },
+  });
+  if (!ticket) return;
+  showPairing(ticket);
+  loadDevices();
 }
 
 function showPairing(ticket) {
@@ -1906,13 +2028,15 @@ function confirmRevokeDevice(id, name) {
     label: 'Revoca',
     danger: true,
     onConfirm: async () => {
-      try {
-        await api('/devices/' + id, { method: 'DELETE' });
-        toast('Dispositivo revocato');
-        loadDevices();
-      } catch (error) {
-        toast(error.message, 'error');
-      }
+      await optimistic({
+        pending: 'Revoco il dispositivo…',
+        apply: (overview) => {
+          if (overview.devices) overview.devices = overview.devices.filter((d) => d.id !== id);
+        },
+        request: () => api('/devices/' + id, { method: 'DELETE' }),
+        success: 'Dispositivo revocato',
+      });
+      loadDevices();
     },
   });
 }
