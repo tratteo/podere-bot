@@ -776,7 +776,7 @@ function renderDevices() {
 
 function deviceCard(d) {
   const meta = DEVICE_STATES[d.state] || { label: d.state, cls: 'muted' };
-  const action = d.state === 'active' || d.state === 'revoked'
+  const action = d.state === 'active'
     ? ''
     : `<button class="btn ghost" data-action="refresh-device" data-device="${d.id}">${icon('link')} Nuovo link</button>`;
 
@@ -793,7 +793,7 @@ function deviceCard(d) {
     </div>
     <div class="button-row">
       ${action}
-      <button class="btn danger-ghost" data-action="revoke-device" data-device="${d.id}" data-name="${esc(d.name)}" ${d.state === 'revoked' ? 'disabled' : ''}>${icon('trash')} Revoca</button>
+      <button class="btn danger-ghost" data-action="revoke-device" data-device="${d.id}" data-name="${esc(d.name)}">${icon('trash')} Revoca</button>
     </div>
   </section>`;
 }

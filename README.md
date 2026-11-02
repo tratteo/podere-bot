@@ -139,7 +139,7 @@ Devices are authorised per device, never by client IP or hostname:
 
 1. Open **Dispositivi › Aggiungi dispositivo** on the panel, or run `./panel-pair.sh "iPad cucina"` on the Pi.
 2. Scan the QR code, or open the printed link, on the device.
-3. The device receives an HttpOnly cookie valid for `SessionDays`; revoking it invalidates the cookie immediately.
+3. The device receives an HttpOnly cookie valid for `SessionDays`; revoking it removes the device from the list, frees the name and invalidates the cookie immediately.
 
 The QR is returned once and never stored: the database keeps only the hash of the single-use link. Generating a new link invalidates the previous one. `Panel:LanHost` must be a stable name or reserved address (for example `poderebot.local`), because the cookie is bound to the Pi origin: if the address changes, the device must pair again.
 

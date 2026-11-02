@@ -116,7 +116,41 @@ public sealed class PanelDeviceServiceTests : IDisposable
         devices.Revoke(paired.Id);
 
         Assert.Null(devices.Authenticate(paired.Key));
-        Assert.Equal("revoked", devices.List().Single().State);
+        Assert.Empty(devices.List());
+    }
+
+    [Fact]
+    public void RevokingFreesTheNameForANewDevice()
+    {
+        var ticket = devices.CreatePairing("iPad", "kiosk");
+        var paired = devices.TryRedeem(Token(ticket.Url), out _)!;
+
+        devices.Revoke(paired.Id);
+        var again = devices.CreatePairing("iPad", "kiosk");
+
+        Assert.Equal("iPad", again.Name);
+        Assert.Single(devices.List());
+    }
+
+    [Fact]
+    public void DevicesRevokedByAnOlderBuildDisappearOnStartup()
+    {
+        var ticket = devices.CreatePairing("Vecchio", "kiosk");
+        using (var connection = store.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE panel_devices SET revoked_at = 1 WHERE id = $id;";
+            command.Parameters.AddWithValue("$id", ticket.Id);
+            command.ExecuteNonQuery();
+        }
+
+        // Hidden from the list even before the cleanup, but the row still holds the name.
+        Assert.Empty(devices.List());
+        Assert.Throws<PanelConflictException>(() => devices.CreatePairing("Vecchio", "kiosk"));
+
+        _ = new PanelStore(store.Path, NullLogger<PanelStore>.Instance);
+
+        Assert.Equal("Vecchio", devices.CreatePairing("Vecchio", "kiosk").Name);
     }
 
     [Fact]
