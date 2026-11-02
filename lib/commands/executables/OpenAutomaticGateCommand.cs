@@ -10,8 +10,9 @@ internal class OpenAutomaticGateCommand(
     IConfiguration configuration,
     ILogger<OpenAutomaticGateCommand> logger,
     UserDirectory users,
-    GateAccessService gateAccess
-) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, gateAccess, GateId.automatic)
+    GateAccessService gateAccess,
+    PodereBot.Services.Panel.NotificationLog notificationLog
+) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, gateAccess, notificationLog, GateId.automatic)
 {
     protected override string GateName => "automatico";
 }

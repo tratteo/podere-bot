@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace PodereBot.Services.Panel;
 
 /// <summary>
@@ -16,7 +18,13 @@ internal sealed class GateControlService(
     {
         await driver.Open(gate);
         access.RecordPanelUse();
-        log.RecordPanel($"Cancello {Describe(gate)} aperto", actor);
+
+        // One gates event, so the opening shows both in Cancelli and in the event history.
+        var who = actor == "kiosk" ? "Pannello" : $"Pannello ({actor})";
+        log.Record(
+            NotificationTopic.Gates,
+            $"🔑 <b>{WebUtility.HtmlEncode(who)}</b> ha aperto il cancello {Describe(gate)}"
+        );
         logger.LogInformation("gate {g} opened from the panel by {a}", gate, actor);
     }
 

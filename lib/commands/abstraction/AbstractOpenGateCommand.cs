@@ -1,5 +1,8 @@
+using System.Globalization;
+using System.Net;
 using System.Text;
 using PodereBot.Services;
+using PodereBot.Services.Panel;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -14,6 +17,7 @@ internal abstract class AbstractOpenGateCommand(
     ILogger<AbstractOpenGateCommand> logger,
     UserDirectory users,
     GateAccessService gateAccess,
+    NotificationLog notificationLog,
     GateId gateId
 ) : Command(logger, configuration, users)
 {
@@ -95,27 +99,40 @@ internal abstract class AbstractOpenGateCommand(
 
             await Arguments.Client.SendChatAction(Arguments.Message.Chat.Id, ChatAction.Typing);
             await gateDriver.Open(gateId);
+
+            // Every opening is an event, whoever did it: the panel history must show it even
+            // when Telegram stays silent (admins) or the notification fails.
+            var actor = ActorName(senderId);
+            var message = $"🔑 <b>{WebUtility.HtmlEncode(actor)}</b> ha aperto il cancello {GateName}";
+            notificationLog.Record(NotificationTopic.Gates, message);
+
+            if (!users.IsAdmin(senderId))
+            {
+                await Arguments.Client.NotifyTopic(NotificationTopic.Gates, message, users, logger);
+            }
+
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
                 $"Ho aperto il cancello {GateName} 🐱",
                 disableNotification: true
             );
-            if (!users.CanControlGates(senderId) && Arguments.Message.From != null)
-            {
-                var name = Arguments.Message.From.FirstName;
-                if (!string.IsNullOrEmpty(Arguments.Message.From.LastName))
-                {
-                    name += $" {Arguments.Message.From.LastName}";
-                }
-                await Arguments.Client.NotifyTopic(
-                    NotificationTopic.Gates,
-                    $"🔑 <b>{name}</b> ha aperto il cancello {GateName}",
-                    users,
-                    logger
-                );
-            }
         }
 
         await DetachEvents();
+    }
+
+    private string ActorName(long senderId)
+    {
+        var stored = users.Find(senderId)?.Name;
+        if (!string.IsNullOrWhiteSpace(stored))
+            return stored;
+
+        var from = Arguments.Message.From;
+        var name = $"{from?.FirstName} {from?.LastName}".Trim();
+        if (!string.IsNullOrWhiteSpace(name))
+            return name;
+        if (!string.IsNullOrWhiteSpace(from?.Username))
+            return $"@{from.Username}";
+        return senderId.ToString(CultureInfo.InvariantCulture);
     }
 }

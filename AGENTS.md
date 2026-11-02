@@ -89,6 +89,8 @@ On boot `BotHostedService` sends a single `Presente` summary with boiler, operat
 
 `Gates:RateLimit` limits non-admin users to `MaxOpenings` per `WindowMinutes`; `admin` and `gate_controller` are never limited. Openings are consumed on confirmation, not on command invocation. While the shared window is open, `GateAccessService` records who used the gates in `db.json`; `GateAccessExpiryDaemon` notifies those users when the window closes.
 
+Every opening made with `/openauto` or `/openped` is recorded as a `gates` event, whoever did it. The `gates` topic is notified for non-admin openings, `gate_controller` included; admin openings stay silent on Telegram because the admin knows, but they still land in the panel history.
+
 ## Database
 
 Single-file JSON database (`db.json`) written to `AppContext.BaseDirectory` on every `Edit()` call, through a temp file plus atomic replace so a power cut cannot truncate it. Reads and clones on every `Data` access. Serialized with System.Text.Json; unknown fields from older files are ignored. No migrations.

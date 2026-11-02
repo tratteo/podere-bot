@@ -10,8 +10,9 @@ internal class OpenPedestrianGateCommand(
     IConfiguration configuration,
     ILogger<OpenPedestrianGateCommand> logger,
     UserDirectory users,
-    GateAccessService gateAccess
-) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, gateAccess, GateId.pedestrian)
+    GateAccessService gateAccess,
+    PodereBot.Services.Panel.NotificationLog notificationLog
+) : AbstractOpenGateCommand(gateDriver, db, configuration, logger, users, gateAccess, notificationLog, GateId.pedestrian)
 {
     protected override string GateName => "pedonale";
 }
