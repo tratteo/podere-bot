@@ -1,20 +1,37 @@
 <!doctype html>
-<html lang="it">
+<html lang="it" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a0e0d">
+<meta name="theme-color" content="#0a0b0b">
 <title>PodereBot · Pairing</title>
-<link rel="stylesheet" href="styles.css?v=13">
+<script>
+  (function () {
+    try {
+      var theme = localStorage.getItem('pb.theme') || 'auto';
+      var dark = theme === 'auto' ? matchMedia('(prefers-color-scheme: dark)').matches : theme === 'dark';
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body class="gate-page">
-  <main class="gate-card">
-    <span class="brand-mark"></span>
-    <h1 id="title">Autorizzo il dispositivo…</h1>
-    <p class="gate-sub" id="message">Verifico il link monouso.</p>
-    <p class="form-error" id="error"></p>
-    <a class="btn primary" id="continue" href="/panel/" hidden>Entra nel pannello</a>
-  </main>
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5"/><circle cx="12" cy="18" r=".6"/></symbol>
+  </svg>
+  <div class="gate-wrap">
+    <div class="aura show" aria-hidden="true"><i class="aura-drift"><i class="aura-morph"><b class="aura-core" style="color:rgb(224,163,67)"></b><b class="aura-hl" style="color:rgb(228,140,70)"></b></i></i></div>
+    <main class="gate-card">
+      <span class="sico" id="state-icon" aria-hidden="true"><span class="spinner"></span></span>
+      <h1 id="title">Autorizzo il dispositivo…</h1>
+      <p class="gate-sub" id="message">Verifico il link monouso.</p>
+      <p class="form-error" id="error"></p>
+      <a class="btn p" id="continue" href="/panel/" hidden style="text-decoration:none;height:72px;font-size:18px">Entra nel pannello</a>
+      <a class="btn g" id="retry" href="/panel/login" hidden style="text-decoration:none;height:72px;font-size:18px">Inserisci un codice</a>
+    </main>
+  </div>
 
   <script>
     const params = new URLSearchParams(location.search);
@@ -23,11 +40,20 @@
     const message = document.getElementById('message');
     const error = document.getElementById('error');
     const proceed = document.getElementById('continue');
+    const retry = document.getElementById('retry');
+    const stateIcon = document.getElementById('state-icon');
+
+    function setIcon(name, tone) {
+      stateIcon.className = 'sico ' + tone;
+      stateIcon.innerHTML = '<svg class="icon"><use href="#i-' + name + '"></use></svg>';
+    }
 
     async function pair() {
       if (!token) {
+        setIcon('alert', 'a');
         title.textContent = 'Link incompleto';
-        message.textContent = 'Manca il codice di pairing. Chiedine uno nuovo dal pannello.';
+        message.textContent = 'Manca il codice di pairing. Generane uno nuovo dal pannello.';
+        retry.hidden = false;
         return;
       }
 
@@ -41,14 +67,17 @@
         const data = await response.json().catch(() => null);
         if (!response.ok) throw new Error(data?.error || 'Pairing non riuscito.');
 
+        setIcon('check', 'g');
         title.textContent = 'Dispositivo autorizzato';
-        message.textContent = `Questo dispositivo è ora "${data.device}". Il link è stato consumato.`;
+        message.textContent = `Questo dispositivo ora è "${data.device}".`;
         proceed.hidden = false;
-        setTimeout(() => location.replace('/panel/'), 1200);
+        setTimeout(() => location.replace('/panel/'), 1400);
       } catch (e) {
+        setIcon('alert', 'r');
         title.textContent = 'Pairing non riuscito';
         message.textContent = 'Il link potrebbe essere scaduto o già usato.';
         error.textContent = e.message;
+        retry.hidden = false;
       }
     }
 

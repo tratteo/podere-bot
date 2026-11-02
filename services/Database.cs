@@ -9,6 +9,10 @@ public class DatabaseSchema
     [JsonPropertyName("GatesOpenAccessExpirationDate")]
     public DateTime? GatesOpenAccessExpirationDate { get; set; } = null;
 
+    /// <summary>When the shared window was opened, so the panel can show how much of it is left.</summary>
+    [JsonPropertyName("GatesOpenAccessStartDate")]
+    public DateTime? GatesOpenAccessStartDate { get; set; } = null;
+
     [JsonPropertyName("HeatingProgram")]
     public HeatingProgram? HeatingProgram { get; set; }
 
@@ -29,6 +33,7 @@ public class DatabaseSchema
         new()
         {
             GatesOpenAccessExpirationDate = GatesOpenAccessExpirationDate,
+            GatesOpenAccessStartDate = GatesOpenAccessStartDate,
             HeatingProgram = HeatingProgram,
             BoilerSinceUtc = BoilerSinceUtc,
             BoilerActive = BoilerActive,

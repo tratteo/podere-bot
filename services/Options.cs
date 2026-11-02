@@ -45,8 +45,40 @@ internal sealed record PanelEventOptions(int RetentionDays, int MaxEntries)
     public static readonly PanelEventOptions Default = new(30, 500);
 }
 
+/// <summary>Where the house is: shared by /sendpos and the outdoor weather.</summary>
+internal sealed record HomeOptions(double Latitude, double Longitude, string Name, string Address)
+{
+    public static readonly HomeOptions Default = new(41.4986180363405, 12.797875896442752, "Podere 739 (canne libere 🪴)", "Via del Valloncello 16");
+}
+
+/// <summary>Outdoor weather from Open-Meteo, used until a real outdoor sensor exists.</summary>
+internal sealed record WeatherOptions(bool Enabled, int RefreshMinutes)
+{
+    public static readonly WeatherOptions Default = new(true, 15);
+}
+
 internal static class OptionsReader
 {
+    public static HomeOptions ReadHome(IConfiguration configuration)
+    {
+        var section = configuration.GetSection("Home");
+        return new HomeOptions(
+            section.GetValue<double?>("Latitude") ?? HomeOptions.Default.Latitude,
+            section.GetValue<double?>("Longitude") ?? HomeOptions.Default.Longitude,
+            string.IsNullOrWhiteSpace(section.GetValue<string>("Name")) ? HomeOptions.Default.Name : section.GetValue<string>("Name")!,
+            string.IsNullOrWhiteSpace(section.GetValue<string>("Address")) ? HomeOptions.Default.Address : section.GetValue<string>("Address")!
+        );
+    }
+
+    public static WeatherOptions ReadWeather(IConfiguration configuration)
+    {
+        var section = configuration.GetSection("Weather");
+        return new WeatherOptions(
+            section.GetValue<bool?>("Enabled") ?? WeatherOptions.Default.Enabled,
+            Math.Max(5, section.GetValue<int?>("RefreshMinutes") ?? WeatherOptions.Default.RefreshMinutes)
+        );
+    }
+
     public static AntifreezeOptions ReadAntifreeze(IConfiguration configuration)
     {
         var section = configuration.GetSection("Heating:Antifreeze");

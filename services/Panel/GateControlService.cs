@@ -39,8 +39,13 @@ internal sealed class GateControlService(
         if (hours is < 1 or > 24)
             throw new PanelValidationException("La finestra deve durare tra 1 e 24 ore.");
 
-        var expiration = DateTime.Now.AddHours(hours);
-        db.Edit(d => d.GatesOpenAccessExpirationDate = expiration);
+        var now = DateTime.Now;
+        var expiration = now.AddHours(hours);
+        db.Edit(d =>
+        {
+            d.GatesOpenAccessStartDate = now;
+            d.GatesOpenAccessExpirationDate = expiration;
+        });
         log.RecordPanel($"Cancelli sbloccati per {hours} h", $"{actor} · fino alle {expiration:HH:mm}");
         logger.LogInformation("gate window opened for {h} h from the panel", hours);
     }

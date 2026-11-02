@@ -69,6 +69,7 @@ builder.Services.AddSingleton<AdminScopeNotifier>();
 builder.Services.AddSingleton<UserAdminService>();
 builder.Services.AddSingleton<PanelUserNames>();
 builder.Services.AddSingleton<UpdateStateStore>();
+builder.Services.AddSingleton<WeatherService>();
 builder.Services.AddSingleton<PanelSnapshotService>();
 
 builder.Services.AddHostedService<HeatingProgramDaemon>();
@@ -127,6 +128,7 @@ builder.Services
 var app = builder.Build();
 
 app.Services.GetRequiredService<ModelPricing>();
+app.Services.GetRequiredService<WeatherService>();
 
 var apiToken = builder.Configuration["API_TOKEN"];
 if (string.IsNullOrWhiteSpace(apiToken))

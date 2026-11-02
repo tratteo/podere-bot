@@ -1,56 +1,119 @@
 'use strict';
 
-const MIN = 60000;
 const CONFIG = window.PANEL_CONFIG || { mode: 'lan', version: 'locale' };
+const $ = (id) => document.getElementById(id);
 
-const ROLES = {
-  admin: { label: 'Admin', icon: 'shield' },
-  gate_controller: { label: 'Gate controller', icon: 'gate' },
+const MIN = 60000;
+const GATE_OPEN_MS = 3000;
+const GATE_DONE_MS = 2200;
+const LIGHTS_MS = 5000;
+const HOURS = [1, 2, 4, 8, 12, 24];
+
+const VIEWS = {
+  home: 'Casa',
+  heating: 'Riscaldamento',
+  gates: 'Cancelli',
+  events: 'Eventi',
+  users: 'Utenti',
+  devices: 'Dispositivi',
+  system: 'Sistema',
 };
+const MORE_VIEWS = ['users', 'devices', 'system'];
+const AURA_VIEWS = ['home', 'heating'];
 
 const TOPICS = {
-  technical: { label: 'Tecnico', icon: 'activity' },
-  heating: { label: 'Riscaldamento', icon: 'heat' },
-  gates: { label: 'Cancelli', icon: 'gate' },
+  technical: { label: 'Tecnico', desc: 'Sensori e salute del sistema' },
+  heating: { label: 'Riscaldamento', desc: 'Caldaia e temperatura' },
+  gates: { label: 'Cancelli', desc: 'Aperture e sblocchi' },
 };
 
 const EVENT_TOPICS = {
   technical: { label: 'Tecnico', icon: 'activity' },
-  heating: { label: 'Riscaldamento', icon: 'heat' },
+  heating: { label: 'Riscaldamento', icon: 'flame' },
   gates: { label: 'Cancelli', icon: 'gate' },
   panel: { label: 'Pannello', icon: 'shield' },
 };
 
+const ROLES = [
+  { key: 'user', icon: 'user', label: 'Utente', desc: 'Apre i cancelli solo durante lo sblocco, con limite' },
+  { key: 'gate', icon: 'gate', label: 'Cancelli', desc: 'Apre sempre, senza limite di aperture' },
+  { key: 'admin', icon: 'shield', label: 'Admin', desc: 'Gestisce bot, utenti e programma' },
+];
+
 const DEVICE_STATES = {
   active: { label: 'Attivo', cls: 'ok' },
   pending: { label: 'In attesa', cls: 'warn' },
-  expired: { label: 'Scaduto', cls: 'muted' },
+  expired: { label: 'Scaduto', cls: '' },
   revoked: { label: 'Revocato', cls: 'bad' },
 };
 
-const views = {
-  home: { title: 'Casa', sub: 'Riepilogo' },
-  heating: { title: 'Riscaldamento', sub: 'Programma, caldaia e antigelo' },
-  gates: { title: 'Cancelli', sub: 'Accessi, finestra e aperture' },
-  events: { title: 'Eventi', sub: 'Notifiche e attività recenti' },
-  system: { title: 'Sistema', sub: 'Salute, sensori e consumo AI' },
-  users: { title: 'Utenti', sub: 'Ruoli, topic e accessi' },
-  devices: { title: 'Dispositivi', sub: 'Accesso al pannello da tablet e telefoni' },
+const RANGES = [
+  ['today', 'Oggi'],
+  ['7d', '7 giorni'],
+  ['30d', '30 giorni'],
+  ['1y', '1 anno'],
+  ['custom', 'Altro'],
+];
+
+/** Blob colour by temperature: flat cold blue up to 10 °C, then cool, mild, comfort, warm. */
+const AURA_STOPS = [
+  [10, [60, 110, 210]],
+  [15, [78, 165, 215]],
+  [18, [70, 178, 160]],
+  [20, [224, 163, 67]],
+  [24, [228, 118, 70]],
+  [28, [214, 80, 84]],
+];
+
+/* ---------- preferences (per device) ---------- */
+
+function readPref(key, fallback, allowed) {
+  try {
+    const value = localStorage.getItem('pb.' + key);
+    return allowed.includes(value) ? value : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+const prefs = {
+  theme: readPref('theme', 'auto', ['auto', 'dark', 'light']),
+  motion: readPref('motion', 'full', ['full', 'calm']),
+  idle: readPref('idle', '2', ['2', '5', '0']),
 };
+
+function savePref(key, value) {
+  prefs[key] = value;
+  try {
+    localStorage.setItem('pb.' + key, value);
+  } catch (e) {
+    /* private mode: the choice lasts for this session */
+  }
+}
+
+/* ---------- state ---------- */
 
 const state = {
   view: 'home',
-  now: new Date(),
   overview: null,
+  skew: 0,
   history: null,
   historyRange: 'today',
   customFrom: '',
   customTo: '',
   events: [],
   eventFilter: 'all',
-  loading: true,
   offline: false,
+  selectedUser: null,
+  gateAnim: null,
+  lightsUntil: 0,
+  boilerPending: null,
+  shownTemp: null,
+  lastInput: Date.now(),
+  idle: false,
 };
+
+const darkQuery = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
 
 /* ---------- api ---------- */
 
@@ -87,18 +150,32 @@ async function api(path, options = {}) {
   return data;
 }
 
+function applyOverview(overview) {
+  state.overview = overview;
+  const server = new Date(overview.serverTime).getTime();
+  if (!Number.isNaN(server)) state.skew = server - Date.now();
+}
+
+let refreshing = false;
+
 async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
   try {
-    const overview = await api('/overview');
-    state.overview = overview;
-    state.now = new Date();
-    state.loading = false;
+    const first = !state.overview;
+    applyOverview(await api('/overview'));
+    const wasOffline = state.offline;
     state.offline = false;
-    render();
+    render(first);
+    if (wasOffline) toast('Di nuovo collegato');
   } catch (error) {
-    state.offline = true;
-    if (error.message !== 'Sessione scaduta') toast(error.message);
-    renderStatus();
+    if (error.message !== 'Sessione scaduta') {
+      if (!state.offline) toast('Bot non raggiungibile, riprovo', 'error');
+      state.offline = true;
+      render();
+    }
+  } finally {
+    refreshing = false;
   }
 }
 
@@ -107,9 +184,9 @@ async function loadEvents() {
     const topic = state.eventFilter === 'all' ? '' : '&topic=' + encodeURIComponent(state.eventFilter);
     const data = await api('/events?limit=50' + topic);
     state.events = data.events || [];
-    if (state.view === 'events') renderEvents();
+    if (state.view === 'events') render();
   } catch (error) {
-    toast(error.message);
+    toast(error.message, 'error');
   }
 }
 
@@ -120,23 +197,23 @@ async function loadHistory() {
         ? '?range=custom&from=' + encodeURIComponent(state.customFrom) + '&to=' + encodeURIComponent(state.customTo)
         : '?range=' + state.historyRange;
     state.history = await api('/history' + query);
-    if (state.view === 'heating' && state.overview) renderHeating();
   } catch (error) {
     state.history = { error: error.message, points: [] };
-    if (state.view === 'heating' && state.overview) renderHeating();
   }
+  if (state.view === 'heating') render();
 }
 
 async function write(path, options) {
   const result = await api(path, options);
   if (result && result.overview) {
-    state.overview = result.overview;
-    state.now = new Date();
+    applyOverview(result.overview);
     render();
-    loadEvents();
+    if (state.view === 'events') loadEvents();
   }
   return result;
 }
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /* ---------- helpers ---------- */
 
@@ -148,50 +225,49 @@ function fmt(n) {
   return n === null || n === undefined || Number.isNaN(Number(n)) ? '—' : Number(n).toFixed(1);
 }
 
-function integer(n) {
-  return new Intl.NumberFormat('it-IT').format(n || 0);
-}
-
 function esc(value) {
   return String(value === null || value === undefined ? '' : value).replace(
     /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
   );
 }
 
+function nowMs() {
+  return Date.now() + state.skew;
+}
+
+function toDate(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function minutesToTime(m) {
-  const h = Math.floor(m / 60);
-  const min = m % 60;
-  return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
 }
 
 function timeToMinutes(v) {
   if (!v) return null;
   const parts = v.split(':').map(Number);
   if (parts.length !== 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) return null;
-  if (parts[0] > 24 || parts[1] > 59) return null;
-  if (parts[0] === 24 && parts[1] !== 0) return null;
+  if (parts[0] > 24 || parts[1] > 59 || (parts[0] === 24 && parts[1] !== 0)) return null;
   return parts[0] * 60 + parts[1];
 }
 
-function fmtTime(date) {
-  if (!date) return '--:--';
-  const d = date instanceof Date ? date : new Date(date);
-  if (Number.isNaN(d.getTime())) return '--:--';
+function fmtTime(value) {
+  const d = toDate(value);
+  if (!d) return '--:--';
   return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
 
-function fmtDate(date) {
-  const d = date instanceof Date ? date : new Date(date);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
+function fmtDate(value) {
+  const d = toDate(value);
+  return d ? d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) : '—';
 }
 
-function relative(date) {
-  if (!date) return 'mai';
-  const d = date instanceof Date ? date : new Date(date);
-  if (Number.isNaN(d.getTime())) return 'mai';
-  const seconds = Math.max(0, Math.round((state.now - d) / 1000));
+function relative(value) {
+  const d = toDate(value);
+  if (!d) return 'mai';
+  const seconds = Math.max(0, Math.round((nowMs() - d.getTime()) / 1000));
   if (seconds < 10) return 'adesso';
   if (seconds < 60) return `${seconds} s fa`;
   const minutes = Math.round(seconds / 60);
@@ -201,12 +277,23 @@ function relative(date) {
   return `${Math.round(hours / 24)} g fa`;
 }
 
+/** Today shows the time, yesterday says so, older entries show the date. */
+function whenLabel(value) {
+  const d = toDate(value);
+  if (!d) return '—';
+  const today = new Date(nowMs());
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  if (d.getTime() >= start) return fmtTime(d);
+  if (d.getTime() >= start - 86400000) return 'ieri ' + fmtTime(d);
+  return fmtDate(d);
+}
+
 function duration(minutes) {
-  if (minutes === null || minutes === undefined) return '—';
+  if (minutes === null || minutes === undefined) return null;
   const m = Math.max(0, Math.round(minutes));
-  if (m < 60) return `${m} minuti`;
-  const hours = Math.floor(m / 60);
-  return `${hours} h ${m % 60} min`;
+  if (m < 1) return null;
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
 }
 
 function uptime(seconds) {
@@ -229,35 +316,54 @@ function initials(name) {
   );
 }
 
+function plural(n, one, many) {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function stripEmoji(value) {
+  return String(value ?? '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** WMO weather codes from Open-Meteo, mapped to an icon and an Italian label. */
+function weatherInfo(code, isDay) {
+  if (code === 0) return { icon: isDay ? 'sun' : 'moon', label: 'Sereno' };
+  if (code === 1 || code === 2) return { icon: isDay ? 'cloud-sun' : 'cloud', label: 'Poco nuvoloso' };
+  if (code === 3) return { icon: 'cloud', label: 'Coperto' };
+  if (code === 45 || code === 48) return { icon: 'fog', label: 'Nebbia' };
+  if (code >= 51 && code <= 57) return { icon: 'rain', label: 'Pioggerella' };
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return { icon: 'rain', label: 'Pioggia' };
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return { icon: 'snow', label: 'Neve' };
+  if (code >= 95) return { icon: 'storm', label: 'Temporale' };
+  return { icon: 'cloud', label: 'Nuvoloso' };
+}
+
 /* ---------- derived ---------- */
 
-function heating() {
-  return state.overview?.heating || null;
-}
+const heating = () => state.overview?.heating || null;
+const temperatures = () => state.overview?.temperatures || null;
+const gates = () => state.overview?.gates || null;
+const alerts = () => state.overview?.alerts || [];
+const weather = () => state.overview?.weather || null;
 
-function temperatures() {
-  return state.overview?.temperatures || null;
-}
-
-function gates() {
-  return state.overview?.gates || null;
-}
-
-function alerts() {
-  return state.overview?.alerts || [];
+function nowMinutes() {
+  const d = new Date(nowMs());
+  return d.getHours() * 60 + d.getMinutes();
 }
 
 function currentInterval() {
   const h = heating();
   if (!h) return null;
-  const m = state.now.getHours() * 60 + state.now.getMinutes();
+  const m = nowMinutes();
   return h.program.intervals.find((i) => m >= i.from && m < i.to) || null;
 }
 
 function nextChange() {
   const h = heating();
   if (!h) return null;
-  const m = state.now.getHours() * 60 + state.now.getMinutes();
+  const m = nowMinutes();
   const out = [];
   for (const i of h.program.intervals) {
     if (i.from > m) out.push({ at: i.from, temp: i.temperature, kind: 'start' });
@@ -267,10 +373,14 @@ function nextChange() {
   return out[0] || null;
 }
 
-function nextLabel(next) {
-  if (!next) return 'Nessun cambio previsto';
-  if (next.kind === 'end') return `Prossimo cambio: ${minutesToTime(next.at)} · spegnimento`;
-  return `Prossima accensione: ${minutesToTime(next.at)} · ${next.temp} °C`;
+function antifreezeActive() {
+  const h = heating();
+  return !!h && h.antifreezeEnabled && h.temperature !== null && h.temperature < h.antifreezeThreshold;
+}
+
+function boilerOn() {
+  const h = heating();
+  return state.boilerPending ?? !!h?.boilerActive;
 }
 
 function sensorState(sensor) {
@@ -278,370 +388,648 @@ function sensorState(sensor) {
   return sensor.fresh ? 'ok' : 'stale';
 }
 
-/** Hero tint: the temperature decides the shade, from cold blue to warm red. */
-function temperatureShade(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
-  const stops = [
-    { at: 0, rgb: [78, 122, 178] },
-    { at: 12, rgb: [86, 163, 128] },
-    { at: 20, rgb: [196, 146, 70] },
-    { at: 30, rgb: [196, 106, 96] },
-  ];
-  const v = Math.max(0, Math.min(30, Number(value)));
-  let from = stops[0];
-  let to = stops[stops.length - 1];
-  for (let i = 0; i < stops.length - 1; i += 1) {
-    if (v >= stops[i].at && v <= stops[i + 1].at) {
-      from = stops[i];
-      to = stops[i + 1];
-      break;
+function lightsLit() {
+  return state.lightsUntil > Date.now();
+}
+
+function userRole(u) {
+  if (u.isAdmin) return 'admin';
+  return u.entitlements.includes('gate_controller') ? 'gate' : 'user';
+}
+
+function sortedUsers() {
+  return [...(state.overview?.users || [])].sort((a, b) => {
+    const rank = { admin: 0, gate: 1, user: 2 };
+    return rank[userRole(a)] - rank[userRole(b)] || (a.name || String(a.id)).localeCompare(b.name || String(b.id), 'it');
+  });
+}
+
+function adminCount() {
+  return (state.overview?.users || []).filter((u) => u.isAdmin).length;
+}
+
+/** Length of the shared window: from the server when known, otherwise the preset that fits. */
+function windowInfo(g) {
+  if (!g?.open || !g.expiresAt) return null;
+  const until = toDate(g.expiresAt);
+  const left = Math.max(0, until.getTime() - nowMs());
+  const opened = toDate(g.openedAt);
+  let total = opened ? until.getTime() - opened.getTime() : 0;
+  if (!(total > 0)) total = (HOURS.find((h) => h * 3600000 >= left) || 24) * 3600000;
+  const minutes = Math.ceil(left / MIN);
+  const label = minutes < 1 ? 'meno di 1 min' : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`;
+  return {
+    until,
+    left,
+    total,
+    hours: Math.round(total / 3600000),
+    fraction: Math.max(0, Math.min(1, left / total)),
+    low: left < 10 * MIN,
+    label,
+  };
+}
+
+/* ---------- DOM morphing ---------- */
+
+/**
+ * Updates the view in place instead of replacing it, so running animations, transitions and
+ * focus survive the 5 s poll. Elements marked data-keep are owned by script (the temperature).
+ */
+function morph(container, html) {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  morphChildren(container, template.content);
+}
+
+function morphChildren(from, to) {
+  const current = Array.from(from.childNodes);
+  const next = Array.from(to.childNodes);
+  next.forEach((node, i) => {
+    const existing = current[i];
+    if (!existing) {
+      from.appendChild(node);
+      return;
     }
+    if (!sameNode(existing, node)) {
+      from.replaceChild(node, existing);
+      return;
+    }
+    if (existing.nodeType !== 1) {
+      if (existing.nodeValue !== node.nodeValue) existing.nodeValue = node.nodeValue;
+      return;
+    }
+    morphElement(existing, node);
+  });
+  for (let i = current.length - 1; i >= next.length; i -= 1) from.removeChild(current[i]);
+}
+
+function sameNode(a, b) {
+  if (a.nodeType !== b.nodeType) return false;
+  if (a.nodeType !== 1) return true;
+  return a.tagName === b.tagName && a.getAttribute('data-key') === b.getAttribute('data-key');
+}
+
+function morphElement(el, next) {
+  if (el.hasAttribute('data-keep')) return;
+  for (const attr of Array.from(el.attributes)) {
+    if (!next.hasAttribute(attr.name)) el.removeAttribute(attr.name);
   }
-  const k = (v - from.at) / (to.at - from.at || 1);
-  const tint = from.rgb.map((c, i) => c + (to.rgb[i] - c) * k);
-  const base = [19, 23, 20];
-  const weight = 0.08;
-  return `rgb(${tint.map((c, i) => Math.round(base[i] * (1 - weight) + c * weight)).join(',')})`;
+  for (const attr of Array.from(next.attributes)) {
+    if (el.getAttribute(attr.name) !== attr.value) el.setAttribute(attr.name, attr.value);
+  }
+  morphChildren(el, next);
 }
 
 /* ---------- render ---------- */
 
-function render() {
+let enterTimer = null;
+
+function render(full = false) {
+  $('app').dataset.view = state.view;
+  renderNav();
+  renderTop();
+
+  const view = $('view');
+  const html = state.overview ? VIEW_RENDERERS[state.view]() : skeleton();
+  if (full) {
+    const before = view.querySelector('[data-tnum]');
+    const rect = before ? before.getBoundingClientRect() : null;
+    view.innerHTML = html;
+    view.classList.remove('enter');
+    void view.offsetWidth;
+    view.classList.add('enter');
+    clearTimeout(enterTimer);
+    enterTimer = setTimeout(() => view.classList.remove('enter'), 1400);
+    enterTemperature(rect);
+  } else {
+    morph(view, html);
+    syncTemperature(700);
+  }
+
+  renderAura();
+  renderIdle();
+  tickLive();
+}
+
+function skeleton() {
+  return `<div class="empty" style="min-height:50vh">${state.offline ? icon('alert') : '<span class="spinner"></span>'}<span>${state.offline ? 'Bot non raggiungibile. Riprovo tra pochi secondi.' : 'Carico i dati dal bot…'}</span></div>`;
+}
+
+function renderNav() {
+  const more = MORE_VIEWS.includes(state.view);
   document.querySelectorAll('.nav-item, .tabs button').forEach((b) => {
-    if (b.dataset.more) {
-      const active = ['system', 'users', 'devices'].includes(state.view);
-      b.classList.toggle('active', active);
-      if (active) b.setAttribute('aria-current', 'page');
-      else b.removeAttribute('aria-current');
-      return;
-    }
-    const active = b.dataset.view === state.view;
+    const active = b.dataset.more ? more : b.dataset.view === state.view;
     b.classList.toggle('active', active);
     if (active) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   });
-  document.querySelectorAll('.view').forEach((v) => {
-    v.classList.toggle('active', v.dataset.view === state.view);
+  movePill();
+}
+
+let pillPlaced = false;
+
+function movePill() {
+  const pill = $('rail-pill');
+  const item = document.querySelector(`.nav-item[data-view="${state.view}"]`);
+  if (!pill || !item || !item.offsetParent) return;
+  if (!pillPlaced) pill.style.transition = 'none';
+  pill.style.transform = `translateY(${item.offsetTop}px)`;
+  if (!pillPlaced) {
+    void pill.offsetWidth;
+    pill.style.transition = '';
+    pill.classList.add('ready');
+    pillPlaced = true;
+  }
+}
+
+function renderTop() {
+  const title = $('page-title');
+  if (title.textContent !== VIEWS[state.view]) title.textContent = VIEWS[state.view];
+
+  const action =
+    state.overview && state.view === 'users'
+      ? `<button class="btn p s" data-action="add-user" aria-label="Aggiungi utente">${icon('plus')}<span class="lbl">Aggiungi utente</span></button>`
+      : state.overview && state.view === 'devices'
+        ? `<button class="btn p s" data-action="add-device" aria-label="Aggiungi dispositivo">${icon('plus')}<span class="lbl">Aggiungi dispositivo</span></button>`
+        : '';
+  morph($('top-action'), action);
+
+  const chip = $('status-chip');
+  const count = alerts().length;
+  const tone = state.offline ? 'bad' : count ? 'warn' : '';
+  chip.className = 'chip' + (tone ? ' ' + tone : '');
+  const label = state.offline ? 'Non raggiungibile' : !state.overview ? 'Collegamento…' : count ? plural(count, 'avviso', 'avvisi') : 'Tutto ok';
+  if ($('status-label').textContent !== label) $('status-label').textContent = label;
+  chip.setAttribute('aria-label', count ? `${label}, apri l'elenco` : label);
+
+  const themeIcon = prefs.theme === 'auto' ? 'auto' : prefs.theme === 'dark' ? 'moon' : 'sun';
+  const button = $('theme-btn');
+  if (button.dataset.icon !== themeIcon) {
+    button.dataset.icon = themeIcon;
+    button.innerHTML = icon(themeIcon, button.dataset.ready ? 'spin-in' : '');
+    button.dataset.ready = '1';
+  }
+
+  const version = state.overview?.system?.version || CONFIG.version || '—';
+  $('rail-version').textContent = version === 'locale' ? 'locale' : 'v' + String(version).slice(0, 7);
+}
+
+/* ---------- temperature number ---------- */
+
+let tweenFrame = null;
+
+function setTemperatureText(text) {
+  document.querySelectorAll('[data-temp]').forEach((el) => {
+    if (el.textContent !== text) el.textContent = text;
   });
-
-  document.getElementById('page-title').textContent = views[state.view].title;
-  document.getElementById('page-sub').textContent = views[state.view].sub;
-
-  if (state.loading && !state.overview) {
-    document.getElementById(state.view + '-view').innerHTML = skeleton();
-  } else if (state.view === 'home') renderHome();
-  else if (state.view === 'heating') renderHeating();
-  else if (state.view === 'gates') renderGates();
-  else if (state.view === 'events') renderEvents();
-  else if (state.view === 'system') renderSystem();
-  else if (state.view === 'users') renderUsers();
-  else if (state.view === 'devices') renderDevices();
-
-  renderStatus();
-  updateClock();
 }
 
-function skeleton() {
-  return `<div class="stack"><section class="card"><div class="empty">${icon('activity')}<span>${state.offline ? 'Bot non raggiungibile. Riprovo…' : 'Carico i dati dal bot…'}</span></div></section></div>`;
-}
-
-function renderStatus() {
-  const overview = state.overview;
-  const health = overview?.health;
-  const tg = document.getElementById('tg-pill');
-  const db = document.getElementById('db-pill');
-  const cpu = document.getElementById('cpu-value');
-  const version = document.getElementById('rail-version');
-  const mode = document.getElementById('rail-mode');
-  const logout = document.getElementById('logout-pill');
-
-  if (tg) tg.classList.toggle('alert', !health?.telegramOk);
-  if (db) db.classList.toggle('alert', !health?.databaseOk);
-  if (cpu) cpu.textContent = health?.cpuTemperatureCelsius ? `${fmt(health.cpuTemperatureCelsius)} °C` : '—';
-  const versionValue = overview?.system?.version || CONFIG.version || '—';
-  if (version) version.textContent = versionValue === 'locale' ? 'locale' : 'v' + versionValue;
-  if (mode) mode.textContent = CONFIG.mode === 'kiosk' ? 'Kiosk locale' : 'Rete locale';
-  if (logout) logout.hidden = CONFIG.mode !== 'lan';
-
-  renderAlertPill();
-}
-
-function renderAlertPill() {
-  const pill = document.getElementById('alert-pill');
-  const count = document.getElementById('alert-count');
-  if (!pill || !count) return;
-  const list = alerts();
-  if (!list.length) {
-    pill.hidden = true;
+function tween(from, to, ms) {
+  cancelAnimationFrame(tweenFrame);
+  if (prefs.motion === 'calm' || from === to) {
+    state.shownTemp = to;
+    setTemperatureText(fmt(to));
     return;
   }
-  pill.hidden = false;
-  count.textContent = `${list.length} ${list.length === 1 ? 'avviso' : 'avvisi'}`;
-  pill.setAttribute('aria-label', `${list.length} avvisi attivi, apri elenco`);
+  const start = performance.now();
+  const step = (time) => {
+    const k = Math.min(1, (time - start) / ms);
+    const eased = 1 - Math.pow(1 - k, 3);
+    state.shownTemp = from + (to - from) * eased;
+    setTemperatureText(fmt(state.shownTemp));
+    if (k < 1) tweenFrame = requestAnimationFrame(step);
+    else state.shownTemp = to;
+  };
+  tweenFrame = requestAnimationFrame(step);
+}
+
+function syncTemperature(ms) {
+  const target = heating()?.temperature;
+  if (target === null || target === undefined) {
+    state.shownTemp = null;
+    setTemperatureText('—');
+    return;
+  }
+  tween(state.shownTemp ?? target, target, ms);
+}
+
+/** Tab change: the number slides from where it was (250 ms) or counts up into place. */
+function enterTemperature(previous) {
+  const el = $('view').querySelector('[data-tnum]');
+  const target = heating()?.temperature;
+  if (!el) return;
+  if (target === null || target === undefined) {
+    syncTemperature(0);
+    return;
+  }
+  const calm = prefs.motion === 'calm' || typeof el.animate !== 'function';
+  if (previous && !calm) {
+    const next = el.getBoundingClientRect();
+    const dx = previous.left - next.left;
+    const dy = previous.top - next.top;
+    const k = previous.height / (next.height || 1);
+    if (Math.abs(dx) + Math.abs(dy) > 0.5 || Math.abs(k - 1) > 0.01) {
+      el.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${k})` }, { transform: 'none' }], {
+        duration: 250,
+        easing: 'cubic-bezier(0.2, 0.9, 0.2, 1)',
+      });
+    }
+    tween(state.shownTemp ?? target, target, 250);
+  } else if (!calm) {
+    el.animate([{ opacity: 0.2, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], {
+      duration: 250,
+      easing: 'cubic-bezier(0.2, 0.9, 0.2, 1)',
+    });
+    tween(target - 1.5, target, 250);
+  } else {
+    tween(target, target, 0);
+  }
+}
+
+/* ---------- aura ---------- */
+
+function auraColor(t) {
+  if (t === null || t === undefined || Number.isNaN(Number(t))) return 'rgb(120,125,122)';
+  const v = Math.max(AURA_STOPS[0][0], Math.min(AURA_STOPS[AURA_STOPS.length - 1][0], Number(t)));
+  for (let i = 0; i < AURA_STOPS.length - 1; i += 1) {
+    const [a, ca] = AURA_STOPS[i];
+    const [b, cb] = AURA_STOPS[i + 1];
+    if (v >= a && v <= b) {
+      const k = (v - a) / (b - a || 1);
+      return 'rgb(' + ca.map((c, j) => Math.round(c + (cb[j] - c) * k)).join(',') + ')';
+    }
+  }
+  return 'rgb(' + AURA_STOPS[AURA_STOPS.length - 1][1].join(',') + ')';
+}
+
+function paintAura(el, t) {
+  const core = el.querySelector('.aura-core');
+  const highlight = el.querySelector('.aura-hl');
+  const base = auraColor(t);
+  const accent = auraColor(t === null || t === undefined ? t : Number(t) + 2.5);
+  if (core.style.color !== base) core.style.color = base;
+  if (highlight.style.color !== accent) highlight.style.color = accent;
+}
+
+function renderAura() {
+  const aura = $('aura');
+  const t = heating()?.temperature;
+  aura.classList.toggle('show', !!state.overview && AURA_VIEWS.includes(state.view) && prefs.motion === 'full');
+  paintAura(aura, t);
+  paintAura($('idle-aura'), t);
+}
+
+/* ---------- shared fragments ---------- */
+
+function boilerLine() {
+  const h = heating();
+  const on = boilerOn();
+  const since = duration(h.boilerOnMinutes);
+  const text = antifreezeActive() ? 'Antigelo attivo, caldaia accesa' : on ? (since ? `Caldaia accesa da ${since}` : 'Caldaia accesa') : 'Caldaia spenta';
+  return `<div class="boil ${on ? 'on' : ''}">${icon('flame', 'fl')}<span>${text}</span></div>`;
+}
+
+function temperatureNumber() {
+  const t = heating()?.temperature;
+  const shown = t === null || t === undefined ? '—' : fmt(state.shownTemp ?? t);
+  return `<div class="temp mono" data-tnum data-keep><span data-temp>${shown}</span><small>°C</small></div>`;
+}
+
+function miniTarget() {
+  const h = heating();
+  const interval = currentInterval();
+  const value = h.program.suspended ? 'Sospeso' : interval ? fmt(interval.temperature) + '°' : h.program.intervals.length ? 'Spento' : '—';
+  return `<div class="mini"><span class="sico">${icon('target')}</span><div><div class="k">Obiettivo</div><div class="mini-value"><b class="mono">${value}</b></div></div></div>`;
+}
+
+function miniOutdoor() {
+  const w = weather();
+  if (!w) {
+    return `<div class="mini"><span class="sico b">${icon('cloud')}</span><div><div class="k">Esterno</div><div class="mini-value"><b class="mono">—</b><span>non disponibile</span></div></div></div>`;
+  }
+  const info = weatherInfo(w.code, w.isDay);
+  const range = w.min !== null && w.min !== undefined ? `<span class="mono">${fmt(w.min)}–${fmt(w.max)}°</span>` : '';
+  return `<div class="mini wx"><span class="sico b">${icon(info.icon)}</span><div><div class="k">Esterno · ${info.label.toLowerCase()}</div><div class="mini-value"><b class="mono">${fmt(w.temperature)}°</b>${range}</div></div></div>`;
+}
+
+function programSummary() {
+  const h = heating();
+  if (!h.program.hasProgram || !h.program.intervals.length) return 'Nessun programma impostato';
+  if (h.program.suspended) return 'Programma sospeso';
+  const interval = currentInterval();
+  if (interval) return `Programma · ${fmt(interval.temperature)}° fino alle ${minutesToTime(interval.to)}`;
+  const next = nextChange();
+  if (next && next.kind === 'start') return `Prossima accensione alle ${minutesToTime(next.at)} · ${fmt(next.temp)}°`;
+  return 'Programma concluso per oggi';
+}
+
+function programSub() {
+  const h = heating();
+  const count = h.program.intervals.length;
+  if (!count) return 'Nessuna fascia: tocca Modifica per crearne una';
+  if (h.program.suspended) return `${plural(count, 'fascia', 'fasce')} · sospeso`;
+  const next = nextChange();
+  if (!next) return `${plural(count, 'fascia', 'fasce')} · concluso per oggi`;
+  return next.kind === 'end'
+    ? `${plural(count, 'fascia', 'fasce')} · alle ${minutesToTime(next.at)} si spegne`
+    : `${plural(count, 'fascia', 'fasce')} · alle ${minutesToTime(next.at)} si accende a ${fmt(next.temp)}°`;
+}
+
+function heatingModeLine() {
+  const h = heating();
+  const interval = currentInterval();
+  let text;
+  if (antifreezeActive()) text = `Antigelo attivo sotto ${fmt(h.antifreezeThreshold)}°`;
+  else if (h.program.suspended) text = 'Programma sospeso, controllo manuale';
+  else if (h.manual) text = 'Controllo manuale';
+  else if (interval) text = `Programma attivo fino alle ${minutesToTime(interval.to)}`;
+  else if (h.program.intervals.length) text = 'Programma in attesa della prossima fascia';
+  else text = 'Nessun programma: controllo manuale';
+  return `<div class="boil"><span>${text}</span></div>`;
+}
+
+function nowPercent() {
+  return ((nowMinutes() / 1440) * 100).toFixed(2);
+}
+
+function timeline(intervals, options = {}) {
+  const blocks = intervals
+    .map((i) => {
+      const left = (i.from / 1440) * 100;
+      const width = ((i.to - i.from) / 1440) * 100;
+      let label = '';
+      if (options.labels) {
+        if (width > 16) label = `${minutesToTime(i.from)}–${minutesToTime(i.to)} · ${fmt(i.temperature)}°`;
+        else if (width > 5) label = `${fmt(i.temperature)}°`;
+      }
+      return `<div class="blk mono" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="${minutesToTime(i.from)}–${minutesToTime(i.to)} · ${fmt(i.temperature)} °C">${label}</div>`;
+    })
+    .join('');
+  const ticks = options.fine ? ['00', '03', '06', '09', '12', '15', '18', '21', '24'] : ['00', '06', '12', '18', '24'];
+  return `<div class="tlw ${options.slim ? 'slim' : ''}"><div class="tl">${blocks}</div><div class="now" style="left:${nowPercent()}%"></div><div class="ticks">${ticks.map((t) => `<span>${t}</span>`).join('')}</div></div>`;
+}
+
+function gateBadge(g) {
+  return g.open
+    ? `<span class="badge ok">${icon('unlock')}Sbloccati fino alle ${fmtTime(g.expiresAt)}</span>`
+    : `<span class="badge">${icon('lock')}Bloccati</span>`;
+}
+
+function gateButton(gate, cls, detail) {
+  const phase = state.gateAnim && state.gateAnim.gate === gate ? state.gateAnim.phase : '';
+  const idle = gate === 'automatic' ? 'Apri automatico' : 'Apri pedonale';
+  const label = phase === 'opening' ? 'Apertura in corso' : phase === 'done' ? 'Aperto' : idle;
+  const small = gate === 'automatic' ? 'Cancello carraio' : detail ? 'Cancello pedonale' : '';
+  return `<button class="gb ${cls} ${phase}" data-action="open-gate" data-gate="${gate}" ${phase ? 'aria-busy="true"' : ''}>
+    <span class="gi">${icon(gate === 'automatic' ? 'car' : 'walk')}</span>
+    <span><span class="gl">${label}</span><span class="ck">${icon('check')}</span>${small && (detail || gate === 'automatic') ? `<small>${small}</small>` : ''}</span>
+    <i class="bar"></i>
+  </button>`;
+}
+
+function eventIcon(topic, title) {
+  if (topic === 'gates') {
+    if (/pedonale/i.test(title)) return 'walk';
+    if (/automatico/i.test(title)) return 'car';
+  }
+  return (EVENT_TOPICS[topic] || { icon: 'activity' }).icon;
+}
+
+function eventRow(e) {
+  const title = stripEmoji(e.title);
+  const detail = stripEmoji(e.detail);
+  const age = nowMs() - (toDate(e.at)?.getTime() || 0);
+  const time = age < 12 * 3600000 ? relative(e.at) : whenLabel(e.at);
+  return `<div class="ev"><span class="evi ${esc(e.topic)}">${icon(eventIcon(e.topic, title))}</span><div><b>${esc(title)}</b>${detail ? `<span class="ev-sub">${esc(detail)}</span>` : ''}</div><time title="${esc(whenLabel(e.at))}">${esc(time)}</time></div>`;
+}
+
+function seg(action, options, current, cls = '', extra = '') {
+  return `<div class="seg ${cls}" role="group">${options
+    .map(([value, label, ic]) => `<button class="${String(value) === String(current) ? 'on' : ''}" data-action="${action}" data-value="${value}" aria-pressed="${String(value) === String(current)}" ${extra}>${ic ? icon(ic) : ''}${label}</button>`)
+    .join('')}</div>`;
+}
+
+/* ---------- views ---------- */
+
+function hero(kind) {
+  const h = heating();
+  return `<section class="hero">
+    <div class="k rise" style="--i:0">Temperatura in casa</div>
+    ${temperatureNumber()}
+    <div class="hero-line rise" style="--i:1">${kind === 'home' ? boilerLine() : heatingModeLine()}</div>
+    <div class="minis rise" style="--i:2">${miniTarget()}${miniOutdoor()}</div>
+    ${kind === 'home' ? `<div class="hero-foot rise" style="--i:3"><div class="sub">${programSummary()}</div>${timeline(h.program.intervals, { slim: true })}</div>` : ''}
+  </section>`;
 }
 
 function renderHome() {
-  const h = heating();
-  const t = temperatures();
   const g = gates();
-  const interval = currentInterval();
-  const next = nextChange();
-  const sensors = t?.sensors || [];
-  const activeSensors = sensors.filter((s) => sensorState(s) !== 'stale').length;
-  const staleSensors = sensors.filter((s) => sensorState(s) === 'stale').length;
-  const trend = t?.trend || [];
-  const delta = trend.length > 1 ? trend[trend.length - 1] - trend[0] : 0;
-  const trendUp = delta >= 0;
-
-  const progBadge = h.program.suspended
-    ? `<span class="badge warn">Sospeso</span>`
-    : !h.program.intervals.length
-      ? `<span class="badge muted">Nessuno</span>`
-      : interval
-        ? `<span class="badge ok">Attivo</span>`
-        : `<span class="badge muted">Fuori fascia</span>`;
-  const progValue = h.program.suspended
-    ? 'Sospeso'
-    : interval
-      ? `${fmt(interval.temperature)} °C`
-      : h.program.intervals.length
-        ? 'Spento'
-        : 'Manuale';
-  const shade = temperatureShade(h.temperature);
-
-  document.getElementById('home-view').innerHTML = `
-    <div class="actions">
-      <button class="tile primary" data-action="open-gate" data-gate="automatic">${icon('gate')}<span>Automatico</span></button>
-      <button class="tile" data-action="open-gate" data-gate="pedestrian">${icon('walk')}<span>Pedonale</span></button>
-      <button class="tile" data-action="lights">${icon('sun')}<span>Luci</span></button>
-      <button class="tile" data-action="window" data-hours="2">${icon('clock')}<span>Finestra</span><small>${g.open ? 'aperta' : '2 h'}</small></button>
-    </div>
-
-    <div class="home-grid">
-      <section class="card hero"${shade ? ` style="background:${shade}"` : ''}>
-        <div class="card-head">
-          <div class="kicker">Temperatura operativa</div>
-          <span class="badge muted">12 h</span>
-        </div>
-        <div class="temp-row"><span class="temp">${fmt(h.temperature)}</span><span class="unit">°C</span></div>
-        <div class="trend-row">
-          <span class="trend ${trendUp ? 'up' : 'down'}">${icon(trendUp ? 'arrow-up' : 'arrow-down')}${trendUp ? '+' : ''}${fmt(delta)} °C</span>
-          <span>nelle ultime 12 ore</span>
-        </div>
-        <div class="spark">${trend.length > 1 ? sparkline(trend) : '<div class="spark-empty">Storico in raccolta</div>'}</div>
-        <div class="strip">
-          <div><span class="label ${h.boilerActive ? 'hot' : ''}">${icon('flame')} Caldaia</span><b>${h.boilerActive ? 'accesa' : 'spenta'}</b><span class="note">${h.boilerActive ? 'da ' + duration(h.boilerOnMinutes) : 'in attesa'}</span></div>
-          <div><span class="label">${icon('snow')} Antigelo</span><b>${fmt(h.antifreezeThreshold)} °C</b><span class="note">${h.antifreezeEnabled ? 'soglia attiva' : 'disattivato'}</span></div>
-          <div><span class="label">${icon('wifi')} Sensori</span><b>${activeSensors} / ${sensors.length}</b><span class="note">${staleSensors ? `${staleSensors} in ritardo` : 'tutti ok'}</span></div>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div><div class="kicker">Eventi</div><div class="value">Oggi</div></div>
-          <button class="link" data-nav="events">Vedi tutti ${icon('chevron')}</button>
-        </div>
-        ${state.overview.events.length ? `<ul class="event-list compact">${state.overview.events.slice(0, 3).map(eventRow).join('')}</ul>` : `<div class="empty">${icon('bell')}<span>Nessun evento registrato.</span></div>`}
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div><div class="kicker">Programma</div><div class="value">${progValue}</div></div>
-          ${progBadge}
-        </div>
-        ${timeline(h.program.intervals, true)}
-        ${h.program.intervals
-          .map(
-            (i) =>
-              `<div class="interval-row home-ival"><span class="interval-time">${minutesToTime(i.from)}–${minutesToTime(i.to)}</span><span class="interval-temp">${fmt(i.temperature)}°</span></div>`
-          )
-          .join('')}
-        <div class="card-foot">${h.program.suspended ? 'Programma sospeso' : nextLabel(next)}</div>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div><div class="kicker">Sensori</div><div class="value">${activeSensors} / ${sensors.length} attivi</div></div>
-          <span class="badge ${staleSensors ? 'warn' : 'ok'}">${staleSensors ? `${staleSensors} in ritardo` : 'tutti ok'}</span>
-        </div>
-        ${sensors.length ? `<div class="sen-list">${sensors.map(sensorLine).join('')}</div>` : `<div class="empty">${icon('wifi')}<span>Nessun sensore configurato.</span></div>`}
-      </section>
-    </div>`;
-}
-
-function sensorLine(s) {
-  return `<div class="sen ${sensorState(s)}"><span class="sen-name">${esc(s.location)}</span><span class="sen-val">${fmt(s.temperature)}°</span><span class="sen-age">${relative(s.timestamp)}</span></div>`;
+  const lit = lightsLit();
+  return `<div class="split">
+    ${hero('home')}
+    <section class="card rise" style="--i:2;gap:16px">
+      <div class="head mb"><span class="title">Cancelli</span>${gateBadge(g)}</div>
+      ${gateButton('automatic', 'p h-lg')}
+      ${gateButton('pedestrian', 'h-md')}
+      <div class="g2" style="margin-top:12px">
+        <button class="btn g ${lit ? 'lit' : ''}" data-action="lights">${icon('sun')}<span>${lit ? 'Accese' : 'Luci'}</span><i class="lbar"></i></button>
+        ${g.open ? `<button class="btn g" data-action="lock-gates">${icon('lock')}Blocca</button>` : `<button class="btn g" data-action="window" data-hours="2">${icon('unlock')}Sblocca 2 h</button>`}
+      </div>
+    </section>
+  </div>`;
 }
 
 function renderHeating() {
   const h = heating();
-  if (!h) return;
-  const t = temperatures();
-  const interval = currentInterval();
-  const next = nextChange();
-  const rows = h.program.intervals
-    .map(
-      (i) =>
-        `<div class="interval-row"><span class="interval-time">${minutesToTime(i.from)} - ${minutesToTime(i.to)}</span><span class="interval-duration">${((i.to - i.from) / 60).toFixed(1)} h</span><span class="interval-temp">${fmt(i.temperature)} °C</span></div>`
-    )
-    .join('');
-  const mode = h.program.suspended ? 'Sospeso' : h.manual ? 'Manuale' : interval ? 'Programma' : 'In attesa';
-  const antifreezeActive = h.antifreezeEnabled && h.temperature !== null && h.temperature < h.antifreezeThreshold;
-  const heatingAlerts = alerts().filter((a) => a.target === 'heating');
-  const rangeLabel =
-    state.historyRange === 'today'
-      ? 'Oggi'
-      : state.historyRange === '7d'
-        ? '7 giorni'
-        : state.historyRange === '30d'
-          ? 'Ultimo mese'
-          : state.historyRange === '1y'
-            ? '1 anno'
-            : 'Personalizzato';
+  const on = boilerOn();
+  const af = antifreezeActive();
+  const afText = !h.antifreezeEnabled
+    ? 'Antigelo disattivato'
+    : af
+      ? `Antigelo attivo sotto ${fmt(h.antifreezeThreshold)}°`
+      : `Antigelo pronto · sotto ${fmt(h.antifreezeThreshold)}°`;
 
-  document.getElementById('heating-view').innerHTML = `
-    <div class="stack">
-      <section class="card heating-hero">
-        <div class="heating-top">
-          <div>
-            <div class="kicker">Riscaldamento</div>
-            <div class="temp-row"><span class="temp">${fmt(h.temperature)}</span><span class="unit">°C</span></div>
-            <div class="trend-row"><span>Operativa · banda ${fmt(h.bandMin)}–${fmt(h.bandMax)} °C</span></div>
-          </div>
-          <div class="heating-state">
-            <span class="state-icon ${h.boilerActive ? 'on' : ''}">${icon('flame')}</span>
-            <div class="heating-text"><b>Caldaia ${h.boilerActive ? 'accesa' : 'spenta'}</b><span>${mode} · ${h.boilerActive ? duration(h.boilerOnMinutes) : '--'}</span></div>
-          </div>
+  return `<div class="stack wide">
+    <div class="split">
+      ${hero('heating')}
+      <section class="card rise" style="--i:2;gap:20px">
+        <div class="head"><span class="title">Caldaia</span></div>
+        ${boilerLine()}
+        <div class="seg full strong xl" role="group" aria-label="Caldaia">
+          <button class="${on ? 'on' : ''}" data-action="boiler" data-on="1" aria-pressed="${on}">Accesa</button>
+          <button class="${on ? '' : 'on'}" data-action="boiler" data-on="0" aria-pressed="${!on}">Spenta</button>
         </div>
-        <div class="button-row">
-          <button class="btn ${h.boilerActive ? '' : 'primary'}" data-action="toggle-boiler">${icon(h.boilerActive ? 'power' : 'flame', h.boilerActive ? '' : 'fill')} ${h.boilerActive ? 'Spegni' : 'Accendi'}</button>
-          <button class="btn" data-action="toggle-suspend" ${h.program.hasProgram ? '' : 'disabled'}>${icon(h.program.suspended ? 'play' : 'pause', h.program.suspended ? 'fill' : '')} ${h.program.suspended ? 'Riprendi programma' : 'Sospendi programma'}</button>
-          <button class="btn" data-action="edit-program">${icon('edit')} Modifica programma</button>
-          <button class="btn danger-ghost" data-action="delete-program" ${h.program.hasProgram ? '' : 'disabled'}>${icon('trash')} Rimuovi programma</button>
-        </div>
-        ${h.program.suspended ? `<div class="notice warn">Programma sospeso. Il riscaldamento è in controllo manuale.</div>` : ''}
-        ${antifreezeActive ? `<div class="notice warn">Antigelo attivo: la caldaia resta accesa a prescindere dal programma.</div>` : ''}
+        <button class="btn g" data-action="toggle-suspend" ${h.program.hasProgram ? '' : 'disabled'}>${icon(h.program.suspended ? 'play' : 'pause')}${h.program.suspended ? 'Riprendi programma' : 'Sospendi programma'}</button>
+        <div class="af ${af ? 'on' : ''}">${icon('snow')}<span>${afText}</span></div>
       </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div><div class="kicker">Programma</div><div class="value">${h.program.intervals.length} fasce</div></div>
-          <span class="badge ${h.program.suspended ? 'warn' : h.program.intervals.length ? 'ok' : 'muted'}">${h.program.suspended ? 'Sospeso' : h.program.intervals.length ? 'Attivo' : 'Nessuno'}</span>
-        </div>
-        ${timeline(h.program.intervals)}
-        <div class="interval-list">${rows || '<div class="empty">' + icon('clock') + '<span>Nessuna fascia impostata.</span></div>'}</div>
-        <div class="card-foot">${h.program.suspended ? 'Programma sospeso' : nextLabel(next)}</div>
-      </section>
-
-      <section class="card chart-card">
-        <div class="card-head">
-          <div><div class="kicker">Temperatura nel tempo</div><div class="value">${rangeLabel}</div></div>
-          <div class="chart-range">
-            <button class="chip-btn ${state.historyRange === 'today' ? 'active' : ''}" data-action="chart-range" data-range="today">Oggi</button>
-            <button class="chip-btn ${state.historyRange === '7d' ? 'active' : ''}" data-action="chart-range" data-range="7d">7 giorni</button>
-            <button class="chip-btn ${state.historyRange === '30d' ? 'active' : ''}" data-action="chart-range" data-range="30d">Ultimo mese</button>
-            <button class="chip-btn ${state.historyRange === '1y' ? 'active' : ''}" data-action="chart-range" data-range="1y">1 anno</button>
-            <button class="chip-btn ${state.historyRange === 'custom' ? 'active' : ''}" data-action="chart-range" data-range="custom">Personalizzato</button>
-          </div>
-        </div>
-        <div class="chart-caption">Media oraria con minimo e massimo · sensori operativi</div>
-        ${temperatureChart()}
-      </section>
-
-      <div class="two-col">
-        <section class="card">
-          <div class="card-head">
-            <div><div class="kicker">Antigelo</div><div class="value">${antifreezeActive ? 'Attivo' : h.antifreezeEnabled ? 'Pronto' : 'Disattivato'}</div></div>
-            <span class="badge ${antifreezeActive ? 'warn' : 'ok'}">soglia ${fmt(h.antifreezeThreshold)} °C</span>
-          </div>
-          <p class="muted" style="margin:10px 0 0;font-size:12px">Sotto la soglia la caldaia resta accesa anche con programma sospeso o spento manualmente.</p>
-          <div class="sys-list">
-            <div class="sys-row"><span>Stato</span><b>${antifreezeActive ? 'Forzatura attiva' : 'Sopra soglia'}</b></div>
-            <div class="sys-row"><span>Isteresi</span><b>+0.5 °C</b></div>
-            <div class="sys-row"><span>Sensore locale</span><b>${esc(t?.localStatus || '—')}</b></div>
-          </div>
-        </section>
-
-        <section class="card">
-          <div class="card-head">
-            <div><div class="kicker">Avvisi</div><div class="value">${heatingAlerts.length ? `${heatingAlerts.length} ${heatingAlerts.length === 1 ? 'avviso' : 'avvisi'}` : 'Nessuno'}</div></div>
-            <span class="badge ${heatingAlerts.length ? 'warn' : 'ok'}">${heatingAlerts.length ? 'attenzione' : 'tutto ok'}</span>
-          </div>
-          ${heatingAlerts.length ? `<div class="sys-list">${heatingAlerts.map((a) => `<div class="sys-row"><span>${esc(a.title)}</span><b style="color:var(--amber)">${esc(a.detail)}</b></div>`).join('')}</div>` : `<div class="empty">${icon('check')}<span>Nessun avviso attivo.</span></div>`}
-        </section>
+    </div>
+    <section class="rise" style="--i:3">
+      <div class="head" style="margin-bottom:28px">
+        <div class="grow"><div class="title">Programma</div><div class="sub">${programSub()}</div></div>
+        <button class="btn s g" data-action="edit-program">${icon('edit')}Modifica</button>
       </div>
-    </div>`;
+      ${timeline(h.program.intervals, { labels: true, fine: true })}
+    </section>
+    <section class="card rise" style="--i:4">
+      <div class="head" style="flex-wrap:wrap"><span class="title">Andamento</span>${seg('chart-range', RANGES, state.historyRange, 'sm')}</div>
+      ${temperatureChart()}
+    </section>
+  </div>`;
+}
+
+function windowCard(g) {
+  const info = windowInfo(g);
+  const open = !!info;
+  return `<section class="card win ${open ? 'open' : ''} rise" style="--i:1">
+    <div class="head win-head">
+      <div class="row grow">
+        <span class="sico wico ${open ? 'g' : ''}">${icon('lock', 'l')}${icon('unlock', 'u')}</span>
+        <div class="win-text">
+          <div class="a"><div class="title">Bloccati</div><div class="sub">Aprono solo admin e gate controller</div></div>
+          <div class="b"><div class="title">Sbloccati per tutti</div><div class="sub">Max ${g.rateMax} aperture ogni ${g.rateWindow} min per utente</div></div>
+        </div>
+      </div>
+      <button class="btn lockbtn" data-action="lock-gates" ${open ? '' : 'tabindex="-1" aria-hidden="true"'}>${icon('lock')}Blocca ora</button>
+    </div>
+    <div class="slot">
+      <div class="sa">Scegli per quanto tempo chiunque nella lista può aprire.</div>
+      <div class="sb">
+        <div class="prow"><span>Fino alle <b class="mono" data-win-until>${open ? fmtTime(info.until) : '--:--'}</b></span><span>ancora <b class="mono" data-win-left>${open ? info.label : '--'}</b></span></div>
+        <div class="pbar ${open && info.low ? 'low' : ''}" data-win-bar><i style="transform:scaleX(${open ? info.fraction.toFixed(4) : 1})"></i></div>
+      </div>
+    </div>
+    <div>
+      <div class="k" style="margin-bottom:14px">Durata dello sblocco</div>
+      <div class="seg full tall" role="group">${HOURS.map((h) => `<button class="${open && info.hours === h ? 'on' : ''}" data-action="window" data-hours="${h}" aria-pressed="${open && info.hours === h}">${h} h</button>`).join('')}</div>
+    </div>
+  </section>`;
+}
+
+function lightsCard() {
+  const lit = lightsLit();
+  const w = weather();
+  const sub = w && w.sunset ? `Accensione temporizzata · tramonto alle ${fmtTime(w.sunset)}` : 'Accensione temporizzata';
+  return `<section class="card inline lights ${lit ? 'lit' : ''} rise" style="--i:2">
+    <span class="sico a">${icon('sun')}</span>
+    <div class="grow"><div class="title">Luci esterne</div><div class="sub">${sub}</div></div>
+    <button class="btn lights-btn" data-action="lights">${icon('sun')}<span>${lit ? 'Accese' : 'Accendi'}</span><i class="lbar"></i></button>
+  </section>`;
 }
 
 function renderGates() {
   const g = gates();
   const recent = g.recent || [];
-  const stateBadge = g.open
-    ? `<span class="badge ok">fino alle ${fmtTime(g.expiresAt)}</span>`
-    : `<span class="badge">bloccati</span>`;
-
-  document.getElementById('gates-view').innerHTML = `
-    <div class="stack">
-      <section class="card">
-        <div class="card-head">
-          <div><div class="kicker">Apri ora</div><div class="value">Accesso immediato</div></div>
-          ${stateBadge}
-        </div>
-        <div class="gate-open-grid">
-          <button class="btn gate gate-open" data-action="open-gate" data-gate="automatic">${icon('gate')} Cancello automatico</button>
-          <button class="btn gate gate-open" data-action="open-gate" data-gate="pedestrian">${icon('walk')} Cancello pedonale</button>
-        </div>
-        <div class="card-foot">${g.open ? 'Finestra aperta: possono aprire anche i non admin.' : 'Cancelli bloccati: il pannello apre come admin.'}</div>
-      </section>
-
-      <section class="card gates-hero">
-        <div class="gate-status">
-          <span class="state-icon ${g.open ? 'ok' : 'locked'}">${icon(g.open ? 'unlock' : 'lock')}</span>
-          <div><div class="kicker">Finestra</div><div class="value">${g.open ? 'Sbloccati' : 'Bloccati'}</div><div class="muted">${g.open ? `Accesso aperto fino alle ${fmtTime(g.expiresAt)}` : 'Solo admin e gate_controller'}</div></div>
-        </div>
-        <div class="window-buttons">
-          ${[1, 2, 4, 8, 12, 24].map((h) => `<button class="btn" data-action="window" data-hours="${h}">${h} h</button>`).join('')}
-        </div>
-        <button class="btn danger" data-action="lock-gates" ${g.open ? '' : 'disabled'}>${icon('lock')} Blocca i cancelli</button>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div><div class="kicker">Illuminazione</div><div class="value">Luci dei cancelli</div></div>
-          <span class="badge muted">impulso breve</span>
-        </div>
-        <p class="muted" style="margin:0;font-size:12px">Accende le luci esterne per pochi istanti, indipendente dalla finestra di accesso.</p>
-        <button class="btn" data-action="lights">${icon('sun')} Attiva luci</button>
-      </section>
-
-      <section class="card">
-        <div class="card-head"><div><div class="kicker">Rate limit</div><div class="value">${g.rateMax} aperture</div></div><span class="badge">ogni ${g.rateWindow} min</span></div>
-        <p class="muted" style="margin:10px 0 0;font-size:12px">Admin e gate_controller non sono mai limitati. Il conteggio parte alla conferma. Il pannello apre come admin.</p>
-      </section>
-
-      <section class="card">
-        <div class="card-head"><div><div class="kicker">Accessi recenti</div><div class="value">Registro</div></div><span class="badge muted">${recent.length} eventi</span></div>
-        ${recent.length ? `<div class="log-list">${recent.map((e) => `<div class="log-row"><span class="event-icon">${icon('gate')}</span><div class="log-main"><b>${esc(e.title)}</b><span>${esc(e.detail || '')}</span></div><span class="log-time">${fmtTime(e.at)}</span></div>`).join('')}</div>` : `<div class="empty">${icon('gate')}<span>Nessuna apertura registrata.</span></div>`}
-      </section>
-    </div>`;
+  return `<div class="stack">
+    <div class="gate-grid rise" style="--i:0">${gateButton('automatic', 'p xl', true)}${gateButton('pedestrian', 'xl', true)}</div>
+    ${windowCard(g)}
+    ${lightsCard()}
+    <section class="card tight rise" style="--i:3">
+      <div class="head mb"><span class="title">Aperture recenti</span></div>
+      ${recent.length ? `<div>${recent.map((e) => eventRow({ topic: 'gates', title: e.title, detail: e.detail, at: e.at })).join('')}</div>` : `<div class="empty">${icon('gate')}<span>Nessuna apertura registrata.</span></div>`}
+    </section>
+  </div>`;
 }
 
 function renderEvents() {
-  const filters = [
-    ['all', 'Tutti'],
-    ['technical', 'Tecnico'],
-    ['heating', 'Riscaldamento'],
-    ['gates', 'Cancelli'],
-    ['panel', 'Pannello'],
-  ];
-  document.getElementById('events-view').innerHTML = `
-    <div class="filter-row">
-      ${filters.map(([k, l]) => `<button class="chip-btn ${state.eventFilter === k ? 'active' : ''}" data-action="filter" data-filter="${k}">${l}</button>`).join('')}
-    </div>
-    <section class="card">
-      <div class="card-head"><div><div class="kicker">Attività</div><div class="value">${state.events.length} eventi</div></div><span class="badge muted">ultimi 50</span></div>
-      ${state.events.length ? `<ul class="event-list">${state.events.map(eventRow).join('')}</ul>` : `<div class="empty">${icon('bell')}<span>Nessun evento in questa categoria.</span></div>`}
+  const filters = [['all', 'Tutti'], ...Object.entries(EVENT_TOPICS).map(([k, v]) => [k, v.label])];
+  return `<div class="filters rise" style="--i:0">${seg('filter', filters, state.eventFilter)}</div>
+    <section class="card tight rise" style="--i:1">
+      <div class="head mb"><span class="title">${plural(state.events.length, 'evento', 'eventi')}</span><span class="badge">ultimi 50</span></div>
+      ${state.events.length ? `<div>${state.events.map(eventRow).join('')}</div>` : `<div class="empty">${icon('bell')}<span>Nessun evento in questa categoria.</span></div>`}
     </section>`;
+}
+
+function userLabel(u) {
+  return u.name || 'ID ' + u.id;
+}
+
+function userRow(u) {
+  const role = ROLES.find((r) => r.key === userRole(u));
+  const topics = u.topics.length;
+  const subscriptions = topics ? plural(topics, 'notifica', 'notifiche') : 'nessuna notifica';
+  return `<button class="ul ${u.id === state.selectedUser ? 'on' : ''}" data-action="select-user" data-user="${u.id}">
+    <span class="avatar">${u.name ? esc(initials(u.name)) : icon('user')}</span>
+    <span class="grow"><b>${esc(userLabel(u))}</b><span>${role.label} · ${subscriptions}</span></span>
+    <span class="chev">${icon('chevron')}</span>
+  </button>`;
+}
+
+function userDetail(u) {
+  const role = userRole(u);
+  const lastAdmin = u.isAdmin && adminCount() <= 1;
+  const meta = ROLES.find((r) => r.key === role);
+  return `<div class="head">
+      <div class="row grow">
+        <span class="avatar lg">${u.name ? esc(initials(u.name)) : icon('user')}</span>
+        <div class="grow"><div class="title">${esc(userLabel(u))}</div><div class="sub mono" style="font-size:15px">${u.name ? 'ID ' + u.id : 'Nome Telegram non disponibile'}</div></div>
+      </div>
+      <div class="actions-inline">
+        <button class="btn s g square" data-action="edit-name" data-user="${u.id}" aria-label="Modifica il nome di ${esc(userLabel(u))}">${icon('edit')}</button>
+        <button class="btn s g square danger-g" data-action="remove-user" data-user="${u.id}" aria-label="Rimuovi ${esc(userLabel(u))}" ${lastAdmin ? 'disabled' : ''}>${icon('trash')}</button>
+      </div>
+    </div>
+    <div class="sec">Ruolo</div>
+    <div class="seg full tall roles" role="group" aria-label="Ruolo">${ROLES.map(
+      (r) => `<button class="${role === r.key ? 'on' : ''}" data-action="set-role" data-user="${u.id}" data-role="${r.key}" aria-pressed="${role === r.key}" ${lastAdmin && r.key !== 'admin' ? 'disabled' : ''}>${icon(r.icon, 'r-' + r.key)}${r.label}</button>`
+    ).join('')}</div>
+    <div class="cap">${meta.desc}</div>
+    ${lastAdmin ? '<div class="note" style="margin-top:8px">Unico admin: per cambiargli ruolo serve prima un altro admin.</div>' : ''}
+    <div class="sec" style="margin-top:40px">Notifiche</div>
+    ${Object.entries(TOPICS)
+      .map(([key, t]) => {
+        const on = u.topics.includes(key);
+        return `<div class="setrow"><div><b>${t.label}</b><span class="d">${t.desc}</span></div><button class="switch" role="switch" aria-checked="${on}" aria-label="Notifiche ${t.label}" data-action="toggle-topic" data-user="${u.id}" data-topic="${key}"></button></div>`;
+      })
+      .join('')}`;
+}
+
+function renderUsers() {
+  const users = sortedUsers();
+  if (!users.length) {
+    return `<section class="card rise"><div class="empty">${icon('users')}<span>Nessun utente. Aggiungine uno con il suo ID Telegram.</span></div></section>`;
+  }
+  if (!users.some((u) => u.id === state.selectedUser)) state.selectedUser = users[0].id;
+  const selected = users.find((u) => u.id === state.selectedUser);
+  return `<div class="users-grid">
+    <section class="card ulist rise" style="--i:0">${users.map(userRow).join('')}</section>
+    <section class="card udetail rise" style="--i:1" id="user-detail"><div class="fade-in" data-key="user-${selected.id}">${userDetail(selected)}</div></section>
+  </div>`;
+}
+
+function deviceCard(d, i) {
+  const meta = DEVICE_STATES[d.state] || { label: d.state, cls: '' };
+  const current = CONFIG.mode === 'lan' && CONFIG.device && CONFIG.device === d.name;
+  return `<section class="card device-card rise" style="--i:${Math.min(i + 1, 5)}">
+    <div class="head">
+      <div class="row grow"><span class="sico">${icon('device')}</span><div class="grow"><div class="title" style="font-size:19px">${esc(d.name)}</div><div class="sub">${current ? 'questo dispositivo' : d.createdBy ? 'creato da ' + esc(d.createdBy) : 'creato dal pannello'}</div></div></div>
+      <span class="badge ${meta.cls}">${meta.label}</span>
+    </div>
+    <div>
+      <div class="kv"><span>Ultimo accesso</span><b>${d.lastSeenAt ? relative(d.lastSeenAt) : 'mai'}</b></div>
+      <div class="kv"><span>Creato</span><b>${fmtDate(d.createdAt)} ${fmtTime(d.createdAt)}</b></div>
+      ${d.pairingExpiresAt && d.state === 'pending' ? `<div class="kv"><span>Link valido fino alle</span><b>${fmtTime(d.pairingExpiresAt)}</b></div>` : ''}
+    </div>
+    <div class="button-row">
+      ${d.state === 'active' ? '' : `<button class="btn s" data-action="refresh-device" data-device="${esc(d.id)}">${icon('link')}Nuovo link</button>`}
+      <button class="btn s danger-g" data-action="revoke-device" data-device="${esc(d.id)}" data-name="${esc(d.name)}">${icon('trash')}Revoca</button>
+    </div>
+  </section>`;
+}
+
+function renderDevices() {
+  const devices = state.overview.devices || [];
+  const self =
+    CONFIG.mode === 'lan'
+      ? `<section class="card inline rise" style="--i:0"><span class="sico">${icon('device')}</span><div class="grow"><div class="title">Questo dispositivo</div><div class="sub">${esc(CONFIG.device || 'Accesso dalla rete locale')}</div></div><button class="btn g" data-action="logout">${icon('logout')}Esci</button></section>`
+      : '';
+  return `<div class="stack">
+    ${self}
+    ${devices.length ? `<div class="device-grid">${devices.map(deviceCard).join('')}</div>` : `<section class="card rise" style="--i:1"><div class="empty">${icon('device')}<span>Nessun dispositivo. Aggiungine uno per usare il pannello da un tablet o un telefono.</span></div></section>`}
+  </div>`;
+}
+
+function healthRow(ic, tone, label, value) {
+  return `<div class="hrow"><span class="sico ${tone}">${icon(ic)}</span><b>${label}</b><span class="v">${value}</span></div>`;
 }
 
 function renderSystem() {
@@ -652,271 +1040,103 @@ function renderSystem() {
   const stale = sensors.filter((s) => sensorState(s) === 'stale').length;
   const pct = usage.weeklyBudgetUsd > 0 ? Math.min(100, (usage.costUsd / usage.weeklyBudgetUsd) * 100) : 0;
   const update = o.update;
+  const w = o.weather;
+  const cpu = health.cpuTemperatureCelsius;
 
-  document.getElementById('system-view').innerHTML = `
-    <div class="stack">
-      <div class="health-grid">
-        <div class="stat"><div class="kicker">${icon('activity')} Telegram</div><b style="color:${health.telegramOk ? 'var(--green)' : 'var(--amber)'}">${health.telegramOk ? 'Connesso' : 'Non connesso'}</b><span>${health.telegramOk ? 'heartbeat attivo' : 'il bot resta operativo in locale'}</span></div>
-        <div class="stat"><div class="kicker">${icon('db')} Database</div><b style="color:${health.databaseOk ? 'var(--green)' : 'var(--red)'}">${health.databaseOk ? 'Scrivibile' : 'Non scrivibile'}</b><span>db.json · registro ${health.panelStoreOk ? 'ok' : 'non disponibile'}</span></div>
-        <div class="stat"><div class="kicker">${icon('cpu')} CPU</div><b>${health.cpuTemperatureCelsius ? fmt(health.cpuTemperatureCelsius) + ' °C' : '—'}</b><span>throttled: ${esc(health.throttled || 'sconosciuto')}</span></div>
-        <div class="stat"><div class="kicker">${icon('clock')} Uptime</div><b>${uptime(o.system.uptimeSeconds)}</b><span>versione ${esc(o.system.version)}</span></div>
-      </div>
+  return `<div class="stack">
+    <section class="card rise" style="--i:0;gap:4px">
+      <div class="head mb"><span class="title">Aspetto</span><span class="badge">Salvato su questo dispositivo</span></div>
+      <div class="setrow tall"><div><b>Tema</b><span class="d">Automatico segue il dispositivo</span></div>${seg('pref-theme', [['auto', 'Automatico', 'auto'], ['dark', 'Scuro', 'moon'], ['light', 'Chiaro', 'sun']], prefs.theme)}</div>
+      <div class="setrow tall"><div><b>Animazioni</b><span class="d">Ridotte spegne lo sfondo animato</span></div>${seg('pref-motion', [['full', 'Complete'], ['calm', 'Ridotte']], prefs.motion)}</div>
+      <div class="setrow tall"><div><b>Riposo schermo</b><span class="d">Orologio e temperature dopo un periodo senza tocchi</span></div><div class="setrow-actions">${seg('pref-idle', [['2', '2 min'], ['5', '5 min'], ['0', 'Mai']], prefs.idle)}<button class="btn s g" data-action="idle-test">${icon('screen')}Prova</button></div></div>
+    </section>
 
-      <section class="card">
-        <div class="card-head"><div><div class="kicker">OpenCode Go · ultimi 7 giorni</div><div class="value">$${usage.costUsd.toFixed(2)} <span class="muted" style="font-size:14px;font-weight:400">/ $${usage.weeklyBudgetUsd}</span></div></div><span class="badge ${pct > 80 ? 'warn' : 'ok'}">${pct.toFixed(0)}% budget</span></div>
-        <div class="usage-bar"><i style="width:${pct}%"></i></div>
-        <div class="usage-meta"><span>${integer(usage.calls)} chiamate</span><span>${(usage.tokens / 1000).toFixed(1)}k token · ${(usage.cachedTokens / 1000).toFixed(1)}k da cache</span></div>
+    <div class="grid-2">
+      <section class="card tight rise" style="--i:1">
+        <div class="head mb"><span class="title">Salute</span><span class="badge ${health.coreOk ? 'ok' : 'bad'}">${health.coreOk ? 'Core attivo' : 'Degradato'}</span></div>
+        <div>
+          ${healthRow('send', health.telegramOk ? 'g' : 'r', 'Telegram', health.telegramOk ? 'Connesso' : 'Non connesso')}
+          ${healthRow('db', health.databaseOk ? 'g' : 'r', 'Database', health.databaseOk ? 'Scrivibile' : 'Non scrivibile')}
+          ${healthRow('bell', health.panelStoreOk ? 'g' : 'r', 'Registro eventi', health.panelStoreOk ? 'Attivo' : 'Non disponibile')}
+          ${healthRow('cloud', w ? 'b' : '', 'Meteo esterno', w ? 'Open-Meteo · ' + relative(w.updatedAt) : 'Non disponibile')}
+          ${healthRow('cpu', cpu > 70 ? 'a' : '', 'CPU', cpu ? `<span class="mono">${fmt(cpu)}°</span>` : '—')}
+          ${healthRow('clock', '', 'Attivo da', uptime(o.system.uptimeSeconds))}
+          ${healthRow('activity', '', 'Memoria', `<span class="mono">${o.system.memoryMb} MB</span>`)}
+        </div>
       </section>
 
-      <section class="card">
-        <div class="card-head"><div><div class="kicker">Sensori</div><div class="value">${sensors.length} configurati</div></div><span class="badge ${stale ? 'warn' : 'ok'}">${stale ? `${stale} in ritardo` : 'tutti ok'}</span></div>
-        <div class="sensor-table">
+      <section class="card tight rise" style="--i:2">
+        <div class="head mb"><span class="title">Sensori</span><span class="badge ${stale ? 'warn' : 'ok'}">${stale ? `${stale} in ritardo` : 'Tutti ok'}</span></div>
+        <div>
+          ${healthRow('heat', o.temperatures.localStatus === 'Ok' ? 'g' : 'a', 'Sensore locale', o.temperatures.local !== null ? `<span class="mono">${fmt(o.temperatures.local)}°</span>` : esc(o.temperatures.localStatus))}
           ${sensors
-            .map(
-              (s) =>
-                `<div class="sensor-row"><span class="name">${esc(s.location)}</span><span class="temp">${fmt(s.temperature)} °C</span><span>${s.informational ? '<span class="badge muted">informativo</span>' : s.fresh ? '<span class="badge ok">ok</span>' : '<span class="badge warn">in ritardo</span>'}</span><span class="updated">${relative(s.timestamp)}</span></div>`
-            )
-            .join('') || `<div class="empty">${icon('wifi')}<span>Nessun sensore configurato.</span></div>`}
+            .map((s) => {
+              const st = sensorState(s);
+              return healthRow('wifi', st === 'ok' ? 'b' : st === 'stale' ? 'a' : '', esc(s.location), `<span class="mono">${fmt(s.temperature)}°</span> · ${relative(s.timestamp)}`);
+            })
+            .join('')}
         </div>
       </section>
+    </div>
 
-      <div class="sys-grid">
-        <section class="card">
-          <div class="card-head"><div><div class="kicker">Sistema</div><div class="value">PodereBot</div></div><span class="badge ${health.coreOk ? 'ok' : 'bad'}">${health.coreOk ? 'core attivo' : 'degradato'}</span></div>
-          <div class="sys-list">
-            <div class="sys-row"><span>Uptime</span><b>${uptime(o.system.uptimeSeconds)}</b></div>
-            <div class="sys-row"><span>Memoria</span><b>${o.system.memoryMb} MB</b></div>
-            <div class="sys-row"><span>Versione</span><b>${esc(o.system.version)}</b></div>
-            <div class="sys-row"><span>Ambiente</span><b>${esc(o.system.environment)}</b></div>
-            <div class="sys-row"><span>Sensore locale</span><b>${esc(o.temperatures.localStatus)}</b></div>
-          </div>
-        </section>
-        <section class="card">
-          <div class="card-head"><div><div class="kicker">Aggiornamento</div><div class="value">Automatico</div></div><span class="badge ${update.result === 'updated' ? 'ok' : update.result === 'failed' || update.result === 'rolled-back' ? 'bad' : 'muted'}">${esc(update.result || 'mai eseguito')}</span></div>
-          <div class="sys-list">
-            <div class="sys-row"><span>Canale</span><b>release</b></div>
-            <div class="sys-row"><span>Ultimo controllo</span><b>${update.lastRunUtc ? relative(update.lastRunUtc) : '—'}</b></div>
-            <div class="sys-row"><span>Versione</span><b>${esc(update.toSha || o.system.version)}</b></div>
-            <div class="sys-row"><span>Dettaglio</span><b>${esc(update.reason || '—')}</b></div>
-          </div>
-          <div class="button-row"><button class="btn ghost" data-action="refresh">${icon('refresh')} Aggiorna dati</button></div>
-        </section>
-      </div>
-    </div>`;
-}
-
-function renderUsers() {
-  const users = [...state.overview.users].sort((a, b) => {
-    const aa = a.isAdmin ? 0 : 1;
-    const bb = b.isAdmin ? 0 : 1;
-    return aa - bb || (a.name || String(a.id)).localeCompare(b.name || String(b.id), 'it');
-  });
-  const admins = users.filter((u) => u.isAdmin).length;
-  const gateControllers = users.filter((u) => u.isGateController).length;
-  const countTopic = (topic) => users.filter((u) => u.topics.includes(topic)).length;
-
-  document.getElementById('users-view').innerHTML = `
-    <div class="stack">
-      <section class="card">
-        <div class="card-head user-view-head">
-          <div><div class="kicker">Utenti</div><div class="value">${users.length} configurati</div></div>
-          <button class="btn primary" data-action="add-user">${icon('plus')} Aggiungi utente</button>
-        </div>
-        <div class="user-stats">
-          <div><b>${users.length}</b><span>utenti</span></div>
-          <div><b>${admins}</b><span>admin</span></div>
-          <div><b>${gateControllers}</b><span>gate controller</span></div>
-          <div><b>${countTopic('technical')}</b><span>tecnico</span></div>
-          <div><b>${countTopic('heating')}</b><span>riscaldamento</span></div>
-          <div><b>${countTopic('gates')}</b><span>cancelli</span></div>
-        </div>
+    <div class="grid-2">
+      <section class="card rise" style="--i:3;gap:20px">
+        <div class="head"><span class="title">Assistente AI</span><span class="badge ${pct > 80 ? 'warn' : 'ok'}">${pct.toFixed(0)}% del budget</span></div>
+        <div class="mono" style="font-size:32px;letter-spacing:-0.02em">$${usage.costUsd.toFixed(2)} <span style="font-size:18px;color:var(--muted)">/ $${usage.weeklyBudgetUsd} in 7 giorni</span></div>
+        <div class="usage-bar ${pct > 80 ? 'high' : ''}"><i style="transform:scaleX(${(pct / 100).toFixed(3)})"></i></div>
+        <div class="note">${new Intl.NumberFormat('it-IT').format(usage.calls)} chiamate · ${(usage.tokens / 1000).toFixed(1)}k token · ${(usage.cachedTokens / 1000).toFixed(1)}k da cache</div>
       </section>
 
-      <div class="user-grid">${users.map(userCard).join('')}</div>
-
-      <section class="card">
-        <div class="card-head"><div><div class="kicker">Come funziona</div><div class="value">Ruoli e topic</div></div></div>
-        <div class="legend-grid">
-          <div class="legend-item"><b>Admin</b><span>Gestisce bot, utenti e programma. Non è limitato.</span></div>
-          <div class="legend-item"><b>Gate controller</b><span>Apre i cancelli senza rate limit. Implicito per gli admin.</span></div>
-          <div class="legend-item"><b>Tecnico</b><span>Riceve sensori e salute del sistema.</span></div>
-          <div class="legend-item"><b>Riscaldamento</b><span>Riceve caldaia e temperatura.</span></div>
-          <div class="legend-item"><b>Cancelli</b><span>Riceve aperture e finestra di accesso.</span></div>
+      <section class="card rise" style="--i:4;gap:16px">
+        <div class="head"><span class="title">Aggiornamento</span><span class="badge ${update.result === 'updated' ? 'ok' : update.result === 'failed' || update.result === 'rolled-back' ? 'bad' : ''}">${esc(update.result || 'mai eseguito')}</span></div>
+        <div>
+          <div class="kv"><span>Canale</span><b>release</b></div>
+          <div class="kv"><span>Ultimo controllo</span><b>${update.lastRunUtc ? relative(update.lastRunUtc) : '—'}</b></div>
+          <div class="kv"><span>Versione</span><b class="mono">${esc(String(update.toSha || o.system.version).slice(0, 12))}</b></div>
+          ${update.reason ? `<div class="kv"><span>Dettaglio</span><b>${esc(update.reason)}</b></div>` : ''}
         </div>
+        <button class="btn g" data-action="refresh">${icon('refresh')}Aggiorna dati</button>
       </section>
-    </div>`;
-}
-
-function userCard(u) {
-  const label = u.name || 'ID ' + u.id;
-  const lastAdmin = u.isAdmin && state.overview.users.filter((x) => x.isAdmin).length <= 1;
-
-  return `<section class="card user-card">
-    <div class="user-head">
-      <span class="avatar">${u.name ? esc(initials(u.name)) : icon('users')}</span>
-      <div class="user-main"><b>${esc(label)}</b><span>${u.name ? 'ID ' + u.id : 'nome non disponibile'}</span></div>
-      <button class="icon-btn" data-action="edit-name" data-user="${u.id}" aria-label="Modifica il nome di ${esc(label)}" title="Modifica nome">${icon('edit')}</button>
-      <button class="icon-btn danger" data-action="remove-user" data-user="${u.id}" aria-label="Rimuovi ${esc(label)}" title="${lastAdmin ? 'Serve almeno un admin' : ''}">${icon('trash')}</button>
     </div>
-    <div class="user-section">
-      <div class="kicker">Ruoli</div>
-      <div class="role-row">
-        <button class="role-btn admin ${u.isAdmin ? 'on' : ''}" data-action="toggle-role" data-user="${u.id}" data-role="admin" aria-pressed="${u.isAdmin}" title="${lastAdmin ? 'Serve almeno un admin' : ''}">${icon(u.isAdmin ? 'check' : 'plus')} Admin</button>
-        <button class="role-btn gate ${u.isGateController && !u.isAdmin ? 'on' : ''}" data-action="toggle-role" data-user="${u.id}" data-role="gate_controller" aria-pressed="${u.isGateController}" ${u.isAdmin ? 'disabled title="Implicito per gli admin"' : ''}>${icon(u.isGateController ? 'check' : 'plus')} Gate controller${u.isAdmin ? ' · implicito' : ''}</button>
-      </div>
-    </div>
-    <div class="user-section">
-      <div class="kicker">Topic</div>
-      <div class="topic-row">${Object.entries(TOPICS)
-        .map(
-          ([key, meta]) =>
-            `<button class="topic-chip ${u.topics.includes(key) ? 'on' : ''}" data-action="toggle-topic" data-user="${u.id}" data-topic="${key}" aria-pressed="${u.topics.includes(key)}">${icon(meta.icon)} ${meta.label}</button>`
-        )
-        .join('')}</div>
-    </div>
-  </section>`;
-}
-
-function renderDevices() {
-  const devices = state.overview.devices || [];
-  const active = devices.filter((d) => d.state === 'active').length;
-
-  document.getElementById('devices-view').innerHTML = `
-    <div class="stack">
-      <section class="card">
-        <div class="card-head user-view-head">
-          <div><div class="kicker">Dispositivi</div><div class="value">${devices.length} ${devices.length === 1 ? 'autorizzato' : 'autorizzati'} · ${active} ${active === 1 ? 'attivo' : 'attivi'}</div></div>
-          <button class="btn primary" data-action="add-device">${icon('plus')} Aggiungi dispositivo</button>
-        </div>
-        <p class="muted" style="margin:10px 0 0;font-size:12px">Ogni dispositivo entra con un link monouso mostrato come QR code. Il nome è un'etichetta: l'identità è la chiave consegnata al dispositivo. Gli indirizzi IP e i nomi di rete non vengono usati.</p>
-      </section>
-
-      ${devices.length ? `<div class="device-grid">${devices.map(deviceCard).join('')}</div>` : `<section class="card"><div class="empty">${icon('device')}<span>Nessun dispositivo. Aggiungine uno per provare il pannello da un tablet o un telefono.</span></div></section>`}
-
-      <section class="card">
-        <div class="card-head"><div><div class="kicker">Come funziona</div><div class="value">Pairing</div></div></div>
-        <div class="legend-grid">
-          <div class="legend-item"><b>Link monouso</b><span>Vale ${CONFIG.mode === 'kiosk' ? '10 minuti' : '10 minuti'} e una sola volta. Il QR viene mostrato una volta sola.</span></div>
-          <div class="legend-item"><b>Sessione</b><span>Il dispositivo riceve un cookie HttpOnly. Revocandolo, il cookie smette di funzionare.</span></div>
-          <div class="legend-item"><b>Host stabile</b><span>Il link usa l'indirizzo LAN del Pi. Se cambia, serve un nuovo pairing.</span></div>
-        </div>
-      </section>
-    </div>`;
-}
-
-function deviceCard(d) {
-  const meta = DEVICE_STATES[d.state] || { label: d.state, cls: 'muted' };
-  const action = d.state === 'active'
-    ? ''
-    : `<button class="btn ghost" data-action="refresh-device" data-device="${d.id}">${icon('link')} Nuovo link</button>`;
-
-  return `<section class="card device-card">
-    <div class="user-head">
-      <span class="avatar">${icon('device')}</span>
-      <div class="user-main"><b>${esc(d.name)}</b><span>${d.createdBy ? 'creato da ' + esc(d.createdBy) : 'creato dal pannello'}</span></div>
-      <span class="badge ${meta.cls}">${meta.label}</span>
-    </div>
-    <div class="sys-list">
-      <div class="sys-row"><span>Ultimo accesso</span><b>${d.lastSeenAt ? relative(d.lastSeenAt) : 'mai'}</b></div>
-      <div class="sys-row"><span>Creato</span><b>${fmtDate(d.createdAt)} ${fmtTime(d.createdAt)}</b></div>
-      ${d.pairingExpiresAt ? `<div class="sys-row"><span>Link valido fino</span><b>${fmtTime(d.pairingExpiresAt)}</b></div>` : ''}
-    </div>
-    <div class="button-row">
-      ${action}
-      <button class="btn danger-ghost" data-action="revoke-device" data-device="${d.id}" data-name="${esc(d.name)}">${icon('trash')} Revoca</button>
-    </div>
-  </section>`;
-}
-
-function eventRow(e) {
-  const meta = EVENT_TOPICS[e.topic] || { icon: 'activity' };
-  const cls = e.topic === 'heating' ? 'heating' : e.topic === 'gates' ? 'gates' : e.topic === 'panel' ? 'panel' : 'technical';
-  const strip = (value) =>
-    String(value ?? '')
-      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  return `<li class="event ${cls}">
-    <span class="event-icon">${icon(meta.icon, e.topic === 'heating' ? 'fill' : '')}</span>
-    <span class="event-main"><b>${esc(strip(e.title))}</b><span>${esc(strip(e.detail))}</span></span>
-    <span class="event-time">${relative(e.at)}</span>
-  </li>`;
-}
-
-/* ---------- chart ---------- */
-
-function sparkline(values) {
-  const w = 240;
-  const h = 56;
-  const pad = 4;
-  const min = Math.min(...values) - 0.3;
-  const max = Math.max(...values) + 0.3;
-  const range = max - min || 1;
-  const points = values.map((v, i) => {
-    const x = pad + (i / (values.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((v - min) / range) * (h - pad * 2);
-    return [x, y];
-  });
-  const line = points.map((p) => p.join(',')).join(' ');
-  const area = `${pad},${h - pad} ${line} ${w - pad},${h - pad}`;
-  const last = points[points.length - 1];
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
-    <polygon points="${area}" fill="currentColor" fill-opacity=".08"></polygon>
-    <polyline points="${line}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline>
-  </svg><span class="spark-dot" style="left:${(last[0] / w) * 100}%;top:${(last[1] / h) * 100}%"></span>`;
-}
-
-function timeline(intervals, compact = false) {
-  if (!intervals.length) return `<div class="notice">Nessun programma impostato.</div>`;
-  const blocks = intervals
-    .map((i) => {
-      const left = (i.from / 1440) * 100;
-      const width = ((i.to - i.from) / 1440) * 100;
-      return `<div class="tl-block" style="left:${left}%;width:${width}%" title="${minutesToTime(i.from)} - ${minutesToTime(i.to)} · ${fmt(i.temperature)} °C"></div>`;
-    })
-    .join('');
-  const nowMin = state.now.getHours() * 60 + state.now.getMinutes();
-  return `<div class="timeline ${compact ? 'compact' : ''}">
-    <div class="tl-track">${blocks}<div class="tl-now" style="left:${(nowMin / 1440) * 100}%"></div></div>
-    <div class="tl-ticks"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
   </div>`;
 }
 
+const VIEW_RENDERERS = {
+  home: renderHome,
+  heating: renderHeating,
+  gates: renderGates,
+  events: renderEvents,
+  users: renderUsers,
+  devices: renderDevices,
+  system: renderSystem,
+};
+
+/* ---------- chart ---------- */
+
 function temperatureChart() {
   const data = state.history;
-  if (!data) return `<div class="empty">${icon('activity')}<span>Carico lo storico…</span></div>`;
-  if (data.error) return `<div class="empty">${icon('alert')}<span>${esc(data.error)}</span></div>`;
+  if (!data) return `<div class="chart-empty"><span class="spinner"></span><span>Carico lo storico…</span></div>`;
+  if (data.error) return `<div class="chart-empty">${icon('alert')}<span>${esc(data.error)}</span></div>`;
 
-  const points = (data.points || []).map((p) => ({
-    at: new Date(p.at),
-    avg: p.avg,
-    min: p.min,
-    max: p.max,
-    samples: p.samples,
-  }));
-  if (points.length < 2) {
-    return `<div class="empty">${icon('activity')}<span>Nessun dato per questo periodo.</span></div>`;
-  }
+  const points = (data.points || []).map((p) => ({ at: new Date(p.at), avg: p.avg, min: p.min, max: p.max }));
+  if (points.length < 2) return `<div class="chart-empty">${icon('activity')}<span>Nessun dato per questo periodo.</span></div>`;
 
-  const lows = points.map((p) => p.min);
-  const highs = points.map((p) => p.max);
-  const min = Math.min(...lows);
-  const max = Math.max(...highs);
+  const min = Math.min(...points.map((p) => p.min));
+  const max = Math.max(...points.map((p) => p.max));
   const avg = points.reduce((sum, p) => sum + p.avg, 0) / points.length;
-  let yMin = Math.floor((min - 1) * 2) / 2;
-  let yMax = Math.ceil((max + 1) * 2) / 2;
+  let yMin = Math.floor((min - 0.5) * 2) / 2;
+  let yMax = Math.ceil((max + 0.5) * 2) / 2;
   if (yMax - yMin < 2) {
     yMin -= 1;
     yMax += 1;
   }
 
-  const W = 600;
-  const H = 200;
+  const W = 640;
+  const H = 160;
   const t0 = points[0].at.getTime();
-  const t1 = points[points.length - 1].at.getTime();
-  const span = t1 - t0 || 1;
+  const span = points[points.length - 1].at.getTime() - t0 || 1;
   const x = (at) => ((at.getTime() - t0) / span) * W;
-  const y = (value) => H - ((value - yMin) / (yMax - yMin)) * H;
+  const y = (v) => H - ((v - yMin) / (yMax - yMin)) * H;
 
   const upper = points.map((p) => `${x(p.at).toFixed(1)},${y(p.max).toFixed(1)}`);
   const lower = points
@@ -924,18 +1144,10 @@ function temperatureChart() {
     .reverse()
     .map((p) => `${x(p.at).toFixed(1)},${y(p.min).toFixed(1)}`);
   const band = `M${upper.join(' L')} L${lower.join(' L')} Z`;
-  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.at).toFixed(1)},${y(p.avg).toFixed(1)}`).join(' ');
+  const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.at).toFixed(1)},${y(p.avg).toFixed(1)}`).join(' ');
+  const grid = [1, 2, 3].map((i) => `<line x1="0" y1="${(H / 4) * i}" x2="${W}" y2="${(H / 4) * i}" stroke="currentColor" stroke-opacity=".07" vector-effect="non-scaling-stroke"/>`).join('');
 
-  const grid = [0, 1, 2, 3]
-    .map(
-      (i) =>
-        `<line x1="0" y1="${(H / 3) * i}" x2="${W}" y2="${(H / 3) * i}" stroke="rgba(255,255,255,.06)" stroke-width="1" vector-effect="non-scaling-stroke"/>`
-    )
-    .join('');
-
-  const yTicks = [yMax, yMax - (yMax - yMin) / 3, yMax - (2 * (yMax - yMin)) / 3, yMin];
-  const yLabels = yTicks.map((v) => `<span>${v.toFixed(1).replace('.0', '')}°</span>`).join('');
-
+  const yLabels = [0, 1, 2, 3, 4].map((i) => `<span>${(yMax - ((yMax - yMin) / 4) * i).toFixed(1)}°</span>`).join('');
   const tickCount = data.bucket === 'day' ? 4 : 5;
   const xLabels = [];
   for (let i = 0; i < tickCount; i += 1) {
@@ -944,24 +1156,118 @@ function temperatureChart() {
   }
 
   const last = points[points.length - 1];
-  const summary = `<div class="chart-summary"><span>Min <b>${fmt(min)}°</b></span><span>Max <b>${fmt(max)}°</b></span><span>Media <b>${fmt(avg)}°</b></span><span>${points.length} ${data.bucket === 'day' ? 'giorni' : 'ore'}</span></div>`;
+  const w = weather();
+  const outdoor = state.historyRange === 'today' && w && w.min !== null && w.min !== undefined ? `<span>Esterno <b>${fmt(w.min)}–${fmt(w.max)}°</b></span>` : '';
+  const key = `${data.range}|${data.from}|${data.to}|${points.length}|${last.at.getTime()}`;
 
-  return `<div class="chart">
-    <div class="chart-y">${yLabels}</div>
-    <div class="chart-plot">
-      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
-        ${grid}
-        <path d="${band}" fill="currentColor" fill-opacity=".10"/>
-        <path d="${line}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
-      </svg>
-      <span class="chart-dot" style="left:${(x(last.at) / W) * 100}%;top:${(y(last.avg) / H) * 100}%"></span>
+  return `<div data-key="${esc(key)}">
+    <div class="chart">
+      <div class="chart-y">${yLabels}</div>
+      <div class="chart-plot">
+        <svg class="reveal" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+          ${grid}
+          <path d="${band}" fill="currentColor" fill-opacity=".08"/>
+          <path d="${line}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+        </svg>
+        <span class="chart-dot" style="left:${((x(last.at) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px"></span>
+      </div>
     </div>
+    <div class="chart-x" style="margin-left:50px">${xLabels.map((l) => `<span>${l}</span>`).join('')}</div>
   </div>
-  <div class="chart-x">${xLabels.map((l) => `<span>${l}</span>`).join('')}</div>
-  ${summary}`;
+  <div class="chart-summary"><span>Min <b>${fmt(min)}°</b></span><span>Max <b>${fmt(max)}°</b></span><span>Media <b>${fmt(avg)}°</b></span><span>${points.length} ${data.bucket === 'day' ? 'giorni' : 'ore'}</span>${outdoor}</div>`;
 }
 
-/* ---------- sheet ---------- */
+/* ---------- live tick ---------- */
+
+function tickLive() {
+  const now = new Date(nowMs());
+  const time = fmtTime(now);
+  const date = now.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+  if ($('clock').textContent !== time) $('clock').textContent = time;
+  if ($('clock-date').textContent !== date) $('clock-date').textContent = date;
+  if ($('idle-clock').textContent !== time) $('idle-clock').textContent = time;
+  const longDate = now.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+  if ($('idle-date').textContent !== longDate) $('idle-date').textContent = longDate;
+
+  const g = gates();
+  const info = windowInfo(g);
+  if (g?.open && !info) {
+    refresh();
+    return;
+  }
+  if (info && info.left <= 0) {
+    refresh();
+    return;
+  }
+  if (info) {
+    const left = document.querySelector('[data-win-left]');
+    if (left && left.textContent !== info.label) left.textContent = info.label;
+    const bar = document.querySelector('[data-win-bar]');
+    if (bar) {
+      bar.classList.toggle('low', info.low);
+      bar.firstElementChild.style.transform = `scaleX(${info.fraction.toFixed(4)})`;
+    }
+  }
+}
+
+/* ---------- idle screen ---------- */
+
+function renderIdle() {
+  const side = $('idle-side');
+  if (!state.overview) return;
+  const h = heating();
+  const w = weather();
+  const info = w ? weatherInfo(w.code, w.isDay) : { icon: 'cloud', label: 'Esterno' };
+  const on = boilerOn();
+  const html = `<div class="mini"><span class="sico ${on ? 'a' : ''}">${icon('flame')}</span><div><div class="k">In casa${on ? ' · caldaia accesa' : ''}</div><div class="mono big"><span data-temp>${fmt(state.shownTemp ?? h.temperature)}</span>°</div></div></div>
+    <div class="mini"><span class="sico b">${icon(info.icon)}</span><div><div class="k">Fuori${w ? ' · ' + info.label.toLowerCase() : ''}</div><div class="mono big">${w ? fmt(w.temperature) + '°' : '—'}</div></div></div>`;
+  morph(side, html);
+}
+
+function showIdle() {
+  if (state.idle || !state.overview) return;
+  state.idle = true;
+  renderIdle();
+  $('idle-aura').classList.toggle('show', prefs.motion === 'full');
+  $('idle').classList.add('show');
+  $('idle').setAttribute('aria-hidden', 'false');
+}
+
+function hideIdle() {
+  if (!state.idle) return;
+  state.idle = false;
+  $('idle').classList.remove('show');
+  $('idle').setAttribute('aria-hidden', 'true');
+  setTimeout(() => {
+    if (!state.idle) $('idle-aura').classList.remove('show');
+  }, 800);
+}
+
+function checkIdle() {
+  if (state.idle || prefs.idle === '0' || !state.overview || isSheetOpen() || state.gateAnim) return;
+  if (Date.now() - state.lastInput > Number(prefs.idle) * MIN) showIdle();
+}
+
+/* ---------- theme ---------- */
+
+function applyTheme() {
+  const dark = prefs.theme === 'auto' ? (darkQuery ? darkQuery.matches : true) : prefs.theme === 'dark';
+  const root = document.documentElement;
+  root.dataset.theme = dark ? 'dark' : 'light';
+  root.classList.toggle('calm', prefs.motion === 'calm');
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', dark ? '#0a0b0b' : '#f4f4f2');
+}
+
+function cycleTheme() {
+  const order = ['auto', 'dark', 'light'];
+  savePref('theme', order[(order.indexOf(prefs.theme) + 1) % order.length]);
+  applyTheme();
+  render();
+  toast(prefs.theme === 'auto' ? 'Tema automatico' : prefs.theme === 'dark' ? 'Tema scuro' : 'Tema chiaro');
+}
+
+/* ---------- sheet and toast ---------- */
 
 let confirmAction = null;
 let sheetTimer = null;
@@ -969,97 +1275,129 @@ let toastTimer = null;
 let toastHide = null;
 let qrTimer = null;
 
-function toast(message) {
-  const el = document.getElementById('toast');
+function toast(message, tone = 'ok') {
+  const el = $('toast');
   clearTimeout(toastTimer);
   clearTimeout(toastHide);
-  el.textContent = message;
+  $('toast-text').textContent = message;
+  $('toast-icon').innerHTML = `<use href="#i-${tone === 'error' ? 'alert' : 'check'}"></use>`;
+  el.classList.toggle('error', tone === 'error');
   el.hidden = false;
   requestAnimationFrame(() => el.classList.add('show'));
   toastTimer = setTimeout(() => {
     el.classList.remove('show');
     toastHide = setTimeout(() => {
       el.hidden = true;
-    }, 180);
+    }, 400);
   }, 2600);
 }
 
 function isSheetOpen() {
-  return !document.getElementById('sheet').hidden;
+  return !$('sheet').hidden;
+}
+
+function fillSheet(title, body, content, actions) {
+  $('sheet-title').textContent = title;
+  $('sheet-body').textContent = body || '';
+  $('sheet-content').innerHTML = content || '';
+  $('sheet-actions').innerHTML = actions || '';
 }
 
 function showSheet() {
-  const sheet = document.getElementById('sheet');
-  const backdrop = document.getElementById('backdrop');
+  const sheet = $('sheet');
+  const backdrop = $('backdrop');
   clearTimeout(sheetTimer);
   sheet.hidden = false;
   backdrop.hidden = false;
-  document.body.classList.add('sheet-open');
   requestAnimationFrame(() => {
     sheet.classList.add('open');
     backdrop.classList.add('open');
   });
-  const focus = sheet.querySelector('.btn.primary, .btn.danger, input');
+  // Only fields take focus: a focused button would show its ring on a touch screen.
+  const focus = sheet.querySelector('input');
   if (focus) {
     setTimeout(() => {
-      if (sheet.classList.contains('open')) focus.focus();
-    }, 240);
+      if (sheet.classList.contains('open')) focus.focus({ preventScroll: true });
+    }, 260);
   }
 }
 
 function closeSheet() {
-  const sheet = document.getElementById('sheet');
-  const backdrop = document.getElementById('backdrop');
+  const sheet = $('sheet');
+  const backdrop = $('backdrop');
   sheet.classList.remove('open');
   backdrop.classList.remove('open');
-  document.body.classList.remove('sheet-open');
   confirmAction = null;
   clearTimeout(sheetTimer);
-  clearTimeout(qrTimer);
+  clearInterval(qrTimer);
   qrTimer = null;
   sheetTimer = setTimeout(() => {
     sheet.hidden = true;
     backdrop.hidden = true;
-    document.getElementById('sheet-content').innerHTML = '';
-    document.getElementById('sheet-actions').innerHTML = '';
-  }, 240);
+    fillSheet('', '', '', '');
+  }, 300);
 }
 
-function openConfirm({ title, body, label = 'Conferma', danger = false, onConfirm }) {
-  confirmAction = onConfirm;
-  document.getElementById('sheet-title').textContent = title;
-  document.getElementById('sheet-body').textContent = body;
-  document.getElementById('sheet-content').innerHTML = '';
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Annulla</button><button class="btn ${danger ? 'danger' : 'primary'}" data-action="confirm">${label}</button>`;
+function openConfirm({ title, body, label = 'Conferma', danger = false, ic = '', onConfirm }) {
+  fillSheet(
+    title,
+    body,
+    '',
+    `<button class="btn g" data-action="close-sheet">Annulla</button><button class="btn ${danger ? 'danger' : 'p'}" data-action="confirm">${ic ? icon(ic) : ''}${label}</button>`
+  );
   showSheet();
+  confirmAction = onConfirm;
 }
 
 function openAlerts() {
   const list = alerts();
-  if (!list.length) return;
-  document.getElementById('sheet-title').textContent = 'Avvisi attivi';
-  document.getElementById('sheet-body').textContent = `${list.length} ${list.length === 1 ? 'condizione richiede' : 'condizioni richiedono'} attenzione.`;
-  document.getElementById('sheet-content').innerHTML = `<div class="alert-list">${list
-    .map(
-      (a) =>
-        `<div class="alert-row"><span class="alert-icon">${icon('alert')}</span><div class="alert-main"><b>${esc(a.title)}</b><span>${esc(a.detail)}</span></div><button class="btn ghost" data-action="go" data-target="${a.target}">Apri</button></div>`
-    )
-    .join('')}</div>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Chiudi</button>`;
-  confirmAction = null;
+  if (!list.length) {
+    toast(state.offline ? 'Bot non raggiungibile' : 'Nessun avviso attivo');
+    return;
+  }
+  fillSheet(
+    'Avvisi attivi',
+    '',
+    `<div>${list
+      .map(
+        (a) =>
+          `<div class="alert-row"><span class="sico a">${icon('alert')}</span><div class="grow"><b>${esc(a.title)}</b><span>${esc(a.detail)}</span></div><button class="btn s g" data-action="go" data-target="${esc(a.target)}">Apri</button></div>`
+      )
+      .join('')}</div>`,
+    `<button class="btn g" data-action="close-sheet">Chiudi</button>`
+  );
+  showSheet();
+}
+
+function openMore() {
+  fillSheet(
+    'Altre sezioni',
+    '',
+    `<div class="more-list">
+      <button class="btn" data-nav="users">${icon('users')}Utenti</button>
+      <button class="btn" data-nav="devices">${icon('device')}Dispositivi</button>
+      <button class="btn" data-nav="system">${icon('gear')}Sistema</button>
+    </div>`,
+    `<button class="btn g" data-action="close-sheet">Chiudi</button>`
+  );
   showSheet();
 }
 
 /* ---------- heating actions ---------- */
 
-async function toggleBoiler() {
+async function setBoiler(on) {
   const h = heating();
+  if (!h || on === boilerOn()) return;
+  state.boilerPending = on;
+  render();
   try {
-    await write(h.boilerActive ? '/heating/off' : '/heating/on', { method: 'POST' });
-    toast(h.boilerActive ? 'Caldaia spenta' : 'Caldaia accesa');
+    await write(on ? '/heating/on' : '/heating/off', { method: 'POST' });
+    toast(on ? 'Caldaia accesa' : 'Caldaia spenta');
   } catch (error) {
-    toast(error.message);
+    toast(error.message, 'error');
   }
+  state.boilerPending = null;
+  render();
 }
 
 async function toggleSuspend() {
@@ -1068,14 +1406,14 @@ async function toggleSuspend() {
     await write('/heating/suspended', { method: 'PUT', body: { suspended: !h.program.suspended } });
     toast(h.program.suspended ? 'Programma ripreso' : 'Programma sospeso');
   } catch (error) {
-    toast(error.message);
+    toast(error.message, 'error');
   }
 }
 
 function confirmDeleteProgram() {
   openConfirm({
     title: 'Rimuovere il programma?',
-    body: 'La caldaia smetterà di seguire un orario fino a un nuovo programma. Le fasce salvate vengono eliminate.',
+    body: 'La caldaia smette di seguire un orario. Le fasce salvate vengono eliminate.',
     label: 'Rimuovi',
     danger: true,
     onConfirm: async () => {
@@ -1083,7 +1421,7 @@ function confirmDeleteProgram() {
         await write('/heating/program', { method: 'DELETE' });
         toast('Programma rimosso');
       } catch (error) {
-        toast(error.message);
+        toast(error.message, 'error');
       }
     },
   });
@@ -1093,39 +1431,46 @@ function editorRow(from, to, temperature) {
   return `<div class="editor-row">
     <label class="field"><span>Dalle</span><input class="from" type="time" value="${minutesToTime(from)}"></label>
     <label class="field"><span>Alle</span><input class="to" type="time" value="${minutesToTime(to)}"></label>
-    <label class="field temp"><span>°C</span><input class="temp" type="number" min="5" max="30" step="0.5" value="${temperature}"></label>
-    <button class="icon-btn danger" data-action="remove-interval" aria-label="Rimuovi fascia">${icon('trash')}</button>
+    <label class="field"><span>°C</span><input class="temp" type="number" inputmode="decimal" min="5" max="30" step="0.5" value="${temperature}"></label>
+    <button class="btn s g square danger-g" data-action="remove-interval" aria-label="Rimuovi fascia">${icon('trash')}</button>
   </div>`;
 }
 
 function openProgramEditor() {
   const h = heating();
-  const rows = h.program.intervals.map((i) => editorRow(i.from, i.to, i.temperature)).join('');
-  document.getElementById('sheet-title').textContent = 'Modifica programma';
-  document.getElementById('sheet-body').textContent =
-    'Imposta le fasce orarie e la temperatura. Le fasce non possono sovrapporsi e devono iniziare prima di finire.';
-  document.getElementById('sheet-content').innerHTML = `<div class="editor" id="editor">${rows}</div><button class="btn ghost add-row" data-action="add-interval">${icon('plus')} Aggiungi fascia</button><p class="form-error" id="editor-error"></p>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Annulla</button><button class="btn primary" data-action="save-program">Salva</button>`;
-  confirmAction = null;
+  fillSheet(
+    'Programma',
+    'Fasce orarie e temperatura. Non possono sovrapporsi.',
+    `<div class="form"><div class="editor" id="editor">${h.program.intervals.map((i) => editorRow(i.from, i.to, i.temperature)).join('')}</div>
+      <div class="editor-actions"><button class="btn s g" data-action="add-interval">${icon('plus')}Aggiungi fascia</button>${h.program.hasProgram ? `<button class="btn s danger-g" data-action="delete-program">${icon('trash')}Rimuovi programma</button>` : ''}</div>
+      <p class="form-error" id="editor-error"></p></div>`,
+    `<button class="btn g" data-action="close-sheet">Annulla</button><button class="btn p" data-action="save-program">Salva</button>`
+  );
   showSheet();
 }
 
 function addIntervalRow() {
-  const editor = document.getElementById('editor');
+  const editor = $('editor');
   if (!editor) return;
-  editor.insertAdjacentHTML('beforeend', editorRow(480, 600, 20));
+  const rows = editor.querySelectorAll('.editor-row');
+  let from = 6 * 60;
+  if (rows.length) {
+    const lastTo = timeToMinutes(rows[rows.length - 1].querySelector('input.to').value);
+    if (lastTo !== null) from = Math.min(lastTo + 60, 22 * 60);
+  }
+  editor.insertAdjacentHTML('beforeend', editorRow(from, Math.min(from + 120, 1440), 20));
 }
 
 async function saveProgram() {
   const rows = Array.from(document.querySelectorAll('#editor .editor-row'));
-  const error = document.getElementById('editor-error');
+  const error = $('editor-error');
   error.textContent = '';
   const intervals = [];
 
   for (const row of rows) {
     const from = timeToMinutes(row.querySelector('input.from').value);
     const to = timeToMinutes(row.querySelector('input.to').value);
-    const temperature = Number(row.querySelector('input.temp').value);
+    const temperature = Number(String(row.querySelector('input.temp').value).replace(',', '.'));
     if (from == null || to == null) {
       error.textContent = 'Completa tutti gli orari.';
       return;
@@ -1142,7 +1487,7 @@ async function saveProgram() {
   }
 
   if (!intervals.length) {
-    error.textContent = 'Aggiungi almeno una fascia.';
+    error.textContent = 'Aggiungi almeno una fascia, oppure rimuovi il programma.';
     return;
   }
 
@@ -1163,425 +1508,28 @@ async function saveProgram() {
   }
 }
 
-/* ---------- gate actions ---------- */
-
-function confirmOpenGate(gate) {
-  const name = gate === 'pedestrian' ? 'pedonale' : 'automatico';
-  const g = gates();
-  openConfirm({
-    title: `Aprire il cancello ${name}?`,
-    body: g.open
-      ? 'Il cancello si apre per pochi secondi. Confermi?'
-      : 'I cancelli sono bloccati, ma il pannello opera come admin e può aprire comunque.',
-    label: 'Apri',
-    onConfirm: async () => {
-      try {
-        await write('/gates/open', { method: 'POST', body: { gate } });
-        toast(`Cancello ${name} aperto`);
-      } catch (error) {
-        toast(error.message);
-      }
-    },
-  });
-}
-
-function confirmWindow(hours) {
-  openConfirm({
-    title: `Sbloccare i cancelli per ${hours} ${hours === 1 ? 'ora' : 'ore'}?`,
-    body: 'Durante la finestra anche gli utenti non admin possono aprire i cancelli, nel rispetto del rate limit.',
-    label: 'Sblocca',
-    onConfirm: async () => {
-      try {
-        await write('/gates/window', { method: 'PUT', body: { hours } });
-        toast('Cancelli sbloccati');
-      } catch (error) {
-        toast(error.message);
-      }
-    },
-  });
-}
-
-function confirmLockGates() {
-  openConfirm({
-    title: 'Bloccare i cancelli?',
-    body: 'Gli utenti non admin non potranno più aprire. Admin e gate_controller restano operativi.',
-    label: 'Blocca',
-    danger: true,
-    onConfirm: async () => {
-      try {
-        await write('/gates/window', { method: 'DELETE' });
-        toast('Cancelli bloccati');
-      } catch (error) {
-        toast(error.message);
-      }
-    },
-  });
-}
-
-async function toggleLights() {
-  try {
-    await write('/gates/lights', { method: 'POST' });
-    toast('Luci dei cancelli attivate');
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-/* ---------- user actions ---------- */
-
-function openAddUser() {  document.getElementById('sheet-title').textContent = 'Aggiungi utente';
-  document.getElementById('sheet-body').textContent = "Inserisci l'ID Telegram e scegli ruoli e topic.";
-  document.getElementById('sheet-content').innerHTML = `<div class="user-form">
-    <label class="field"><span>ID Telegram</span><input id="new-user-id" type="text" inputmode="numeric" autocomplete="off" placeholder="123456789"></label>
-    <label class="field"><span>Nome</span><input id="new-user-name" type="text" autocomplete="off" placeholder="Matteo"></label>
-    <div class="form-block"><span class="kicker">Ruoli</span>
-      <label class="check"><input type="checkbox" id="new-admin"> Admin</label>
-      <label class="check"><input type="checkbox" id="new-gate"> Gate controller</label>
-    </div>
-    <div class="form-block"><span class="kicker">Topic</span>
-      <label class="check"><input type="checkbox" id="new-technical"> Tecnico</label>
-      <label class="check"><input type="checkbox" id="new-heating"> Riscaldamento</label>
-      <label class="check"><input type="checkbox" id="new-gates"> Cancelli</label>
-    </div>
-    <p class="form-error" id="user-error"></p>
-  </div>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Annulla</button><button class="btn primary" data-action="save-user">Aggiungi</button>`;
-  const admin = document.getElementById('new-admin');
-  admin.addEventListener('change', () => {
-    if (!admin.checked) return;
-    ['new-technical', 'new-heating', 'new-gates'].forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) el.checked = true;
-    });
-  });
-  confirmAction = null;
-  showSheet();
-}
-
-async function saveUser() {
-  const idInput = document.getElementById('new-user-id');
-  if (!idInput) return;
-  const error = document.getElementById('user-error');
-  error.textContent = '';
-  const rawId = idInput.value.replace(/\D/g, '');
-  const id = Number(rawId);
-  if (!rawId || !Number.isSafeInteger(id) || id <= 0) {
-    error.textContent = 'Inserisci un ID Telegram numerico.';
-    return;
-  }
-  if (state.overview.users.some((u) => u.id === id)) {
-    error.textContent = 'Questo ID è già nella lista.';
-    return;
-  }
-
-  const name = document.getElementById('new-user-name').value.trim();
-  const entitlements = [];
-  if (document.getElementById('new-admin').checked) entitlements.push('admin');
-  if (document.getElementById('new-gate').checked) entitlements.push('gate_controller');
-  const topics = [];
-  if (document.getElementById('new-technical').checked) topics.push('technical');
-  if (document.getElementById('new-heating').checked) topics.push('heating');
-  if (document.getElementById('new-gates').checked) topics.push('gates');
-
-  try {
-    await write('/users', { method: 'POST', body: { id, name, entitlements, topics } });
-    closeSheet();
-    toast('Utente aggiunto');
-  } catch (e) {
-    error.textContent = e.message;
-  }
-}
-
-function openEditName(userId) {
-  const user = state.overview.users.find((u) => u.id === userId);
-  if (!user) return;
-
-  document.getElementById('sheet-title').textContent = 'Nome utente';
-  document.getElementById('sheet-body').textContent =
-    "Il nome è un'etichetta del pannello. Se lo lasci vuoto provo a leggerlo da Telegram.";
-  document.getElementById('sheet-content').innerHTML = `<div class="user-form">
-    <label class="field"><span>Nome</span><input id="name-input" data-user="${user.id}" type="text" maxlength="80" autocomplete="off" value="${esc(user.name || '')}" placeholder="Es. Matteo"></label>
-    <p class="form-error" id="name-error"></p>
-  </div>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Annulla</button><button class="btn primary" data-action="save-name">Salva</button>`;
-  confirmAction = null;
-  showSheet();
-}
-
-async function saveName() {
-  const input = document.getElementById('name-input');
-  const error = document.getElementById('name-error');
-  if (!input || !error) return;
-  error.textContent = '';
-
-  const id = Number(input.dataset.user);
-  const user = state.overview.users.find((u) => u.id === id);
-  if (!user) return;
-
-  try {
-    await write('/users/' + id, {
-      method: 'PATCH',
-      body: { name: input.value.trim(), entitlements: user.entitlements, topics: user.topics },
-    });
-    closeSheet();
-    toast('Nome aggiornato');
-  } catch (e) {
-    error.textContent = e.message;
-  }
-}
-
-async function toggleRole(userId, role) {
-  const user = state.overview.users.find((u) => u.id === userId);
-  if (!user) return;
-  const has = user.entitlements.includes(role);
-  const entitlements = has ? user.entitlements.filter((r) => r !== role) : [...user.entitlements, role];
-  if (role === 'admin' && has && state.overview.users.filter((u) => u.isAdmin).length <= 1) {
-    toast('Serve almeno un admin');
-    return;
-  }
-  if (role === 'gate_controller' && user.isAdmin) {
-    toast('Gate controller è implicito per gli admin');
-    return;
-  }
-
-  // Optimistic: the switch flips immediately, the server confirms right after.
-  const before = {
-    entitlements: [...user.entitlements],
-    isAdmin: user.isAdmin,
-    isGateController: user.isGateController,
-  };
-  user.entitlements = entitlements;
-  user.isAdmin = entitlements.includes('admin');
-  user.isGateController = user.isAdmin || entitlements.includes('gate_controller');
-  renderUsers();
-
-  try {
-    await write('/users/' + userId, { method: 'PATCH', body: { name: user.name, entitlements, topics: user.topics } });
-    toast(`${ROLES[role].label} ${has ? 'revocato' : 'concesso'}`);
-  } catch (error) {
-    Object.assign(user, before);
-    renderUsers();
-    toast(error.message);
-  }
-}
-
-async function toggleTopic(userId, topic) {
-  const user = state.overview.users.find((u) => u.id === userId);
-  if (!user) return;
-  const has = user.topics.includes(topic);
-  const topics = has ? user.topics.filter((t) => t !== topic) : [...user.topics, topic];
-
-  const before = [...user.topics];
-  user.topics = topics;
-  renderUsers();
-
-  try {
-    await write('/users/' + userId, { method: 'PATCH', body: { name: user.name, entitlements: user.entitlements, topics } });
-    toast(`Topic ${TOPICS[topic].label} ${has ? 'disattivato' : 'attivato'}`);
-  } catch (error) {
-    user.topics = before;
-    renderUsers();
-    toast(error.message);
-  }
-}
-
-function confirmRemoveUser(userId) {
-  const user = state.overview.users.find((u) => u.id === userId);
-  if (!user) return;
-  const label = user.name || 'ID ' + user.id;
-  if (user.isAdmin && state.overview.users.filter((u) => u.isAdmin).length <= 1) {
-    toast('Serve almeno un admin');
-    return;
-  }
-  openConfirm({
-    title: `Rimuovere ${label}?`,
-    body: user.isAdmin
-      ? 'Non riceverà più notifiche, non potrà usare i comandi e perderà i permessi di admin.'
-      : 'Non riceverà più notifiche e non potrà usare i comandi.',
-    label: 'Rimuovi',
-    danger: true,
-    onConfirm: async () => {
-      try {
-        await write('/users/' + userId, { method: 'DELETE' });
-        toast('Utente rimosso');
-      } catch (error) {
-        toast(error.message);
-      }
-    },
-  });
-}
-
-/* ---------- device actions ---------- */
-
-function openAddDevice() {
-  document.getElementById('sheet-title').textContent = 'Aggiungi dispositivo';
-  document.getElementById('sheet-body').textContent =
-    'Dai un nome al dispositivo. Il server genera un link monouso e lo mostra come QR code: vale una sola volta.';
-  document.getElementById('sheet-content').innerHTML = `<div class="user-form">
-    <label class="field"><span>Nome dispositivo</span><input id="device-name" type="text" maxlength="60" autocomplete="off" placeholder="iPad cucina"></label>
-    <p class="form-error" id="device-error"></p>
-  </div>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Annulla</button><button class="btn primary" data-action="create-device">Genera QR</button>`;
-  confirmAction = null;
-  showSheet();
-}
-
-async function createDevice(id) {
-  const error = document.getElementById('device-error');
-  if (!error) return;
-  error.textContent = '';
-
-  if (id) {
-    try {
-      const ticket = await api('/devices/' + id + '/pair', { method: 'POST' });
-      showPairing(ticket);
-      loadDevices();
-    } catch (e) {
-      error.textContent = e.message;
-    }
-    return;
-  }
-
-  const nameInput = document.getElementById('device-name');
-  if (!nameInput) return;
-  const name = nameInput.value.trim();
-  if (!name) {
-    error.textContent = 'Il nome è obbligatorio.';
-    return;
-  }
-
-  try {
-    const ticket = await api('/devices/pair', { method: 'POST', body: { name } });
-    showPairing(ticket);
-    loadDevices();
-  } catch (e) {
-    error.textContent = e.message;
-  }
-}
-
-function showPairing(ticket) {
-  document.getElementById('sheet-title').textContent = 'Inquadra il QR code';
-  document.getElementById('sheet-body').textContent = `Apri la fotocamera del dispositivo "${ticket.name}" e inquadra il codice. Il link vale una sola volta.`;
-  document.getElementById('sheet-content').innerHTML = `
-    <div class="qr-card">
-      <div class="qr">${ticket.qrSvg}</div>
-      <div class="qr-countdown" id="qr-countdown">—</div>
-      <div class="qr-url"><input id="pair-url" type="text" readonly value="${esc(ticket.url)}"><button class="btn ghost" data-action="copy-link">Copia link</button></div>
-      <p class="muted qr-note">Se chiudi questo foglio il QR non è più recuperabile: potrai generare un nuovo link, che invalida il precedente.</p>
-    </div>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Chiudi</button>`;
-  confirmAction = null;
-  showSheet();
-  startQrCountdown(ticket.expiresAt);
-}
-
-function startQrCountdown(expiresAt) {
-  clearInterval(qrTimer);
-  const expires = new Date(expiresAt).getTime();
-  const tick = () => {
-    const el = document.getElementById('qr-countdown');
-    if (!el) {
-      clearInterval(qrTimer);
-      return;
-    }
-    const left = Math.max(0, Math.round((expires - Date.now()) / 1000));
-    if (left === 0) {
-      el.textContent = 'Link scaduto · genera un nuovo link';
-      clearInterval(qrTimer);
-      return;
-    }
-    const minutes = Math.floor(left / 60);
-    const seconds = left % 60;
-    el.textContent = `Valido ancora ${minutes}:${String(seconds).padStart(2, '0')}`;
-  };
-  tick();
-  qrTimer = setInterval(tick, 1000);
-}
-
-async function copyLink() {
-  const input = document.getElementById('pair-url');
-  if (!input) return;
-  try {
-    await navigator.clipboard.writeText(input.value);
-    toast('Link copiato');
-  } catch (error) {
-    input.select();
-    toast('Copia il link selezionato');
-  }
-}
-
-function refreshDevicePairing(id) {
-  document.getElementById('sheet-title').textContent = 'Nuovo link di pairing';
-  document.getElementById('sheet-body').textContent = 'Il link precedente smette di funzionare.';
-  document.getElementById('sheet-content').innerHTML = `<p class="muted">Genero un nuovo link monouso per questo dispositivo.</p><p class="form-error" id="device-error"></p>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Annulla</button><button class="btn primary" data-action="confirm-create-device" data-device="${id}">Genera</button>`;
-  confirmAction = null;
-  showSheet();
-}
-
-function confirmRevokeDevice(id, name) {
-  openConfirm({
-    title: `Revocare "${name}"?`,
-    body: 'Il dispositivo perde subito la sessione e dovrà essere riaccoppiato con un nuovo link.',
-    label: 'Revoca',
-    danger: true,
-    onConfirm: async () => {
-      try {
-        await api('/devices/' + id, { method: 'DELETE' });
-        toast('Dispositivo revocato');
-        loadDevices();
-      } catch (error) {
-        toast(error.message);
-      }
-    },
-  });
-}
-
-async function loadDevices() {
-  try {
-    const data = await api('/devices');
-    if (state.overview) state.overview.devices = data.devices || [];
-    if (state.view === 'devices') renderDevices();
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-async function logout() {
-  try {
-    await api('/logout', { method: 'POST' });
-  } catch (error) {
-    /* the cookie may already be gone */
-  }
-  location.replace('/panel/login');
-}
-
-/* ---------- custom range ---------- */
-
 function openCustomRange() {
-  const now = new Date();
+  const now = new Date(nowMs());
   const from = new Date(now.getTime() - 7 * 86400000);
-  const toInput = (d) => {
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-
-  document.getElementById('sheet-title').textContent = 'Intervallo personalizzato';
-  document.getElementById('sheet-body').textContent = 'Massimo un anno. La data di fine deve essere successiva a quella di inizio.';
-  document.getElementById('sheet-content').innerHTML = `<div class="user-form">
-    <label class="field"><span>Dal</span><input id="range-from" type="datetime-local" value="${toInput(from)}"></label>
-    <label class="field"><span>Al</span><input id="range-to" type="datetime-local" value="${toInput(now)}"></label>
-    <p class="form-error" id="range-error"></p>
-  </div>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Annulla</button><button class="btn primary" data-action="apply-range">Applica</button>`;
-  confirmAction = null;
+  const pad = (n) => String(n).padStart(2, '0');
+  const toInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  fillSheet(
+    'Intervallo personalizzato',
+    'Massimo un anno.',
+    `<div class="form">
+      <label class="field"><span>Dal</span><input id="range-from" type="datetime-local" value="${state.customFrom || toInput(from)}"></label>
+      <label class="field"><span>Al</span><input id="range-to" type="datetime-local" value="${state.customTo || toInput(now)}"></label>
+      <p class="form-error" id="range-error"></p>
+    </div>`,
+    `<button class="btn g" data-action="close-sheet">Annulla</button><button class="btn p" data-action="apply-range">Mostra</button>`
+  );
   showSheet();
 }
 
 async function applyRange() {
-  const from = document.getElementById('range-from').value;
-  const to = document.getElementById('range-to').value;
-  const error = document.getElementById('range-error');
+  const from = $('range-from').value;
+  const to = $('range-to').value;
+  const error = $('range-error');
   error.textContent = '';
   if (!from || !to) {
     error.textContent = 'Indica la data di inizio e di fine.';
@@ -1595,173 +1543,597 @@ async function applyRange() {
     error.textContent = "L'intervallo massimo è di un anno.";
     return;
   }
-
   state.customFrom = from;
   state.customTo = to;
   state.historyRange = 'custom';
+  state.history = null;
   closeSheet();
+  render();
   await loadHistory();
 }
-
-/* ---------- navigation ---------- */
-
-function openMore() {
-  document.getElementById('sheet-title').textContent = 'Altre sezioni';
-  document.getElementById('sheet-body').textContent = 'Sistema, utenti e dispositivi.';
-  document.getElementById('sheet-content').innerHTML = `<div class="more-grid">
-    <button class="btn" data-nav="system">${icon('gear')} Sistema</button>
-    <button class="btn" data-nav="users">${icon('users')} Utenti</button>
-    <button class="btn" data-nav="devices">${icon('device')} Dispositivi</button>
-  </div>`;
-  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Chiudi</button>`;
-  confirmAction = null;
-  showSheet();
-}
-
-function setView(name) {
-  if (!views[name]) return;
-  if (isSheetOpen()) closeSheet();
-  state.view = name;
-  try {
-    if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
-  } catch (e) {
-    /* the app still works without the hash */
-  }
-  render();
-  if (name === 'heating') loadHistory();
-  if (name === 'events') loadEvents();
-  if (name === 'devices') loadDevices();
-  window.scrollTo(0, 0);
-}
-
-/* ---------- events ---------- */
-
-document.addEventListener('click', async (event) => {
-  const nav = event.target.closest('[data-nav]');
-  if (nav) {
-    setView(nav.dataset.nav);
-    return;
-  }
-
-  const viewButton = event.target.closest('[data-view]');
-  if (viewButton && (viewButton.classList.contains('nav-item') || viewButton.closest('.tabs'))) {
-    setView(viewButton.dataset.view);
-    return;
-  }
-
-  const moreButton = event.target.closest('[data-more]');
-  if (moreButton) {
-    openMore();
-    return;
-  }
-
-  const button = event.target.closest('[data-action]');
-  if (!button) return;
-  const action = button.dataset.action;
-
-  if (action === 'toggle-boiler') await toggleBoiler();
-  else if (action === 'toggle-suspend') await toggleSuspend();
-  else if (action === 'edit-program') openProgramEditor();
-  else if (action === 'delete-program') confirmDeleteProgram();
-  else if (action === 'open-gate') confirmOpenGate(button.dataset.gate);
-  else if (action === 'window') confirmWindow(Number(button.dataset.hours));
-  else if (action === 'lock-gates') confirmLockGates();
-  else if (action === 'lights') await toggleLights();
-  else if (action === 'add-user') openAddUser();
-  else if (action === 'save-user') await saveUser();
-  else if (action === 'edit-name') openEditName(Number(button.dataset.user));
-  else if (action === 'save-name') await saveName();
-  else if (action === 'toggle-role') await toggleRole(Number(button.dataset.user), button.dataset.role);
-  else if (action === 'toggle-topic') await toggleTopic(Number(button.dataset.user), button.dataset.topic);
-  else if (action === 'remove-user') confirmRemoveUser(Number(button.dataset.user));
-  else if (action === 'add-device') openAddDevice();
-  else if (action === 'create-device') await createDevice(null);
-  else if (action === 'confirm-create-device') await createDevice(button.dataset.device);
-  else if (action === 'refresh-device') refreshDevicePairing(button.dataset.device);
-  else if (action === 'revoke-device') confirmRevokeDevice(button.dataset.device, button.dataset.name);
-  else if (action === 'copy-link') await copyLink();
-  else if (action === 'logout') await logout();
-  else if (action === 'chart-range') await changeRange(button.dataset.range);
-  else if (action === 'filter') {
-    state.eventFilter = button.dataset.filter;
-    await loadEvents();
-    renderEvents();
-  } else if (action === 'refresh') {
-    await refresh();
-    await loadEvents();
-    toast('Dati aggiornati');
-  } else if (action === 'alerts') openAlerts();
-  else if (action === 'go') {
-    const target = button.dataset.target;
-    closeSheet();
-    if (target) setView(target);
-  } else if (action === 'close-sheet') closeSheet();
-  else if (action === 'confirm') {
-    const fn = confirmAction;
-    confirmAction = null;
-    closeSheet();
-    if (fn) await fn();
-  } else if (action === 'add-interval') addIntervalRow();
-  else if (action === 'remove-interval') {
-    const row = button.closest('.editor-row');
-    if (row) row.remove();
-  } else if (action === 'save-program') await saveProgram();
-  else if (action === 'apply-range') await applyRange();
-});
 
 async function changeRange(range) {
   if (range === 'custom') {
     openCustomRange();
     return;
   }
+  if (range === state.historyRange) return;
   state.historyRange = range;
-  renderHeating();
+  state.history = null;
+  render();
   await loadHistory();
 }
 
-document.getElementById('backdrop').addEventListener('click', closeSheet);
+/* ---------- gate actions ---------- */
+
+function gateName(gate) {
+  return gate === 'pedestrian' ? 'pedonale' : 'automatico';
+}
+
+function confirmOpenGate(gate) {
+  if (state.gateAnim) return;
+  openConfirm({
+    title: `Aprire il cancello ${gateName(gate)}?`,
+    body: 'Si apre per pochi secondi.',
+    label: 'Apri',
+    ic: gate === 'automatic' ? 'car' : 'walk',
+    onConfirm: () => openGate(gate),
+  });
+}
+
+async function openGate(gate) {
+  state.gateAnim = { gate, phase: 'opening' };
+  render();
+  const started = Date.now();
+  try {
+    await write('/gates/open', { method: 'POST', body: { gate } });
+    await wait(Math.max(0, GATE_OPEN_MS - (Date.now() - started)));
+    state.gateAnim = { gate, phase: 'done' };
+    render();
+    toast(`Cancello ${gateName(gate)} aperto`);
+    await wait(GATE_DONE_MS);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+  state.gateAnim = null;
+  render();
+}
+
+async function openWindow(hours) {
+  try {
+    await write('/gates/window', { method: 'PUT', body: { hours } });
+    toast(`Cancelli sbloccati per ${hours} h`);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+async function lockGates() {
+  try {
+    await write('/gates/window', { method: 'DELETE' });
+    toast('Cancelli bloccati');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+async function triggerLights() {
+  if (lightsLit()) return;
+  state.lightsUntil = Date.now() + LIGHTS_MS;
+  render();
+  setTimeout(render, LIGHTS_MS + 50);
+  try {
+    await write('/gates/lights', { method: 'POST' });
+    toast('Luci esterne accese');
+  } catch (error) {
+    state.lightsUntil = 0;
+    render();
+    toast(error.message, 'error');
+  }
+}
+
+/* ---------- user actions ---------- */
+
+function findUser(id) {
+  return state.overview.users.find((u) => u.id === id);
+}
+
+function roleSeg(current, action, extra = '') {
+  return `<div class="seg full tall roles" role="group" aria-label="Ruolo">${ROLES.map(
+    (r) => `<button type="button" class="${current === r.key ? 'on' : ''}" data-action="${action}" data-role="${r.key}" aria-pressed="${current === r.key}" ${extra}>${icon(r.icon, 'r-' + r.key)}${r.label}</button>`
+  ).join('')}</div>`;
+}
+
+function openAddUser() {
+  fillSheet(
+    'Aggiungi utente',
+    '',
+    `<div class="form">
+      <label class="field"><span>ID Telegram</span><input id="new-user-id" type="text" inputmode="numeric" autocomplete="off" placeholder="Es. 123456789"></label>
+      <label class="field"><span>Nome</span><input id="new-user-name" type="text" autocomplete="off" maxlength="80" placeholder="Facoltativo, altrimenti da Telegram"></label>
+      <div><div class="sec first">Ruolo</div>${roleSeg('user', 'form-role')}<div class="cap" id="new-role-cap">${ROLES[0].desc}</div></div>
+      <div><div class="sec first">Notifiche</div>${Object.entries(TOPICS)
+        .map(([key, t]) => `<div class="setrow"><div><b>${t.label}</b><span class="d">${t.desc}</span></div><button type="button" class="switch" role="switch" aria-checked="false" aria-label="Notifiche ${t.label}" data-action="form-switch" data-topic="${key}"></button></div>`)
+        .join('')}</div>
+      <p class="form-error" id="user-error"></p>
+    </div>`,
+    `<button class="btn g" data-action="close-sheet">Annulla</button><button class="btn p" data-action="save-user">Aggiungi</button>`
+  );
+  showSheet();
+}
+
+function pickFormRole(button) {
+  const group = button.closest('.seg');
+  group.querySelectorAll('button').forEach((b) => {
+    const on = b === button;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
+  });
+  const role = ROLES.find((r) => r.key === button.dataset.role);
+  const cap = $('new-role-cap');
+  if (cap) cap.textContent = role.desc;
+  if (role.key === 'admin') document.querySelectorAll('#sheet [data-action="form-switch"]').forEach((s) => s.setAttribute('aria-checked', 'true'));
+}
+
+function entitlementsFor(user, role) {
+  const base = (user?.entitlements || []).filter((e) => e !== 'admin' && e !== 'gate_controller');
+  if (role === 'admin') base.push('admin');
+  if (role === 'gate') base.push('gate_controller');
+  return base;
+}
+
+async function saveUser() {
+  const idInput = $('new-user-id');
+  if (!idInput) return;
+  const error = $('user-error');
+  error.textContent = '';
+  const rawId = idInput.value.replace(/\D/g, '');
+  const id = Number(rawId);
+  if (!rawId || !Number.isSafeInteger(id) || id <= 0) {
+    error.textContent = 'Inserisci un ID Telegram numerico.';
+    return;
+  }
+  if (state.overview.users.some((u) => u.id === id)) {
+    error.textContent = 'Questo ID è già nella lista.';
+    return;
+  }
+  const role = document.querySelector('#sheet [data-action="form-role"].on')?.dataset.role || 'user';
+  const topics = Array.from(document.querySelectorAll('#sheet [data-action="form-switch"][aria-checked="true"]')).map((s) => s.dataset.topic);
+  const name = $('new-user-name').value.trim();
+
+  try {
+    await write('/users', { method: 'POST', body: { id, name, entitlements: entitlementsFor(null, role), topics } });
+    state.selectedUser = id;
+    closeSheet();
+    render();
+    toast('Utente aggiunto');
+  } catch (e) {
+    error.textContent = e.message;
+  }
+}
+
+function openEditName(userId) {
+  const user = findUser(userId);
+  if (!user) return;
+  fillSheet(
+    'Nome utente',
+    'Se lo lasci vuoto uso il nome di Telegram.',
+    `<div class="form">
+      <label class="field"><span>Nome</span><input id="name-input" data-user="${user.id}" type="text" maxlength="80" autocomplete="off" value="${esc(user.name || '')}" placeholder="Es. Matteo"></label>
+      <p class="form-error" id="name-error"></p>
+    </div>`,
+    `<button class="btn g" data-action="close-sheet">Annulla</button><button class="btn p" data-action="save-name">Salva</button>`
+  );
+  showSheet();
+}
+
+async function saveName() {
+  const input = $('name-input');
+  const error = $('name-error');
+  if (!input || !error) return;
+  error.textContent = '';
+  const user = findUser(Number(input.dataset.user));
+  if (!user) return;
+  try {
+    await write('/users/' + user.id, { method: 'PATCH', body: { name: input.value.trim(), entitlements: user.entitlements, topics: user.topics } });
+    closeSheet();
+    toast('Nome aggiornato');
+  } catch (e) {
+    error.textContent = e.message;
+  }
+}
+
+async function patchUser(user, changes, message) {
+  const before = { entitlements: [...user.entitlements], topics: [...user.topics], isAdmin: user.isAdmin, isGateController: user.isGateController };
+  Object.assign(user, changes);
+  user.isAdmin = user.entitlements.includes('admin');
+  user.isGateController = user.isAdmin || user.entitlements.includes('gate_controller');
+  render();
+  try {
+    await write('/users/' + user.id, { method: 'PATCH', body: { name: user.name, entitlements: user.entitlements, topics: user.topics } });
+    toast(message);
+  } catch (error) {
+    Object.assign(user, before);
+    render();
+    toast(error.message, 'error');
+  }
+}
+
+async function setRole(userId, role) {
+  const user = findUser(userId);
+  if (!user || userRole(user) === role) return;
+  if (user.isAdmin && role !== 'admin' && adminCount() <= 1) {
+    toast('Serve almeno un admin', 'error');
+    return;
+  }
+  const label = ROLES.find((r) => r.key === role).label;
+  await patchUser(user, { entitlements: entitlementsFor(user, role) }, `${userLabel(user)}: ruolo ${label}`);
+}
+
+async function toggleTopic(userId, topic) {
+  const user = findUser(userId);
+  if (!user) return;
+  const has = user.topics.includes(topic);
+  const topics = has ? user.topics.filter((t) => t !== topic) : [...user.topics, topic];
+  await patchUser(user, { topics }, `Notifiche ${TOPICS[topic].label} ${has ? 'disattivate' : 'attivate'}`);
+}
+
+function confirmRemoveUser(userId) {
+  const user = findUser(userId);
+  if (!user) return;
+  if (user.isAdmin && adminCount() <= 1) {
+    toast('Serve almeno un admin', 'error');
+    return;
+  }
+  openConfirm({
+    title: `Rimuovere ${userLabel(user)}?`,
+    body: user.isAdmin ? 'Perde i permessi di admin, le notifiche e l’accesso ai comandi.' : 'Perde le notifiche e l’accesso ai comandi.',
+    label: 'Rimuovi',
+    danger: true,
+    onConfirm: async () => {
+      try {
+        await write('/users/' + userId, { method: 'DELETE' });
+        if (state.selectedUser === userId) state.selectedUser = null;
+        render();
+        toast('Utente rimosso');
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    },
+  });
+}
+
+/* ---------- device actions ---------- */
+
+function openAddDevice() {
+  fillSheet(
+    'Aggiungi dispositivo',
+    'Genero un link monouso, mostrato come QR code.',
+    `<div class="form">
+      <label class="field"><span>Nome del dispositivo</span><input id="device-name" type="text" maxlength="60" autocomplete="off" placeholder="Es. iPad cucina"></label>
+      <p class="form-error" id="device-error"></p>
+    </div>`,
+    `<button class="btn g" data-action="close-sheet">Annulla</button><button class="btn p" data-action="create-device">Genera QR</button>`
+  );
+  showSheet();
+}
+
+async function createDevice(id) {
+  const error = $('device-error');
+  if (!error) return;
+  error.textContent = '';
+  try {
+    let ticket;
+    if (id) {
+      ticket = await api('/devices/' + id + '/pair', { method: 'POST' });
+    } else {
+      const name = $('device-name').value.trim();
+      if (!name) {
+        error.textContent = 'Il nome è obbligatorio.';
+        return;
+      }
+      ticket = await api('/devices/pair', { method: 'POST', body: { name } });
+    }
+    showPairing(ticket);
+    loadDevices();
+  } catch (e) {
+    error.textContent = e.message;
+  }
+}
+
+function showPairing(ticket) {
+  fillSheet(
+    'Inquadra il QR code',
+    `Apri la fotocamera di "${ticket.name}". Il link vale una sola volta.`,
+    `<div class="qr-card">
+      <div class="qr">${ticket.qrSvg}</div>
+      <div class="qr-countdown" id="qr-countdown">—</div>
+      <div class="qr-url"><input id="pair-url" type="text" readonly value="${esc(ticket.url)}"><button class="btn s g" data-action="copy-link">${icon('link')}Copia</button></div>
+    </div>`,
+    `<button class="btn g" data-action="close-sheet">Chiudi</button>`
+  );
+  showSheet();
+  startQrCountdown(ticket.expiresAt);
+}
+
+function startQrCountdown(expiresAt) {
+  clearInterval(qrTimer);
+  const expires = new Date(expiresAt).getTime();
+  const tick = () => {
+    const el = $('qr-countdown');
+    if (!el) {
+      clearInterval(qrTimer);
+      return;
+    }
+    const left = Math.max(0, Math.round((expires - Date.now()) / 1000));
+    if (left === 0) {
+      el.textContent = 'Link scaduto, generane uno nuovo';
+      clearInterval(qrTimer);
+      return;
+    }
+    el.textContent = `Valido ancora ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  };
+  tick();
+  qrTimer = setInterval(tick, 1000);
+}
+
+async function copyLink() {
+  const input = $('pair-url');
+  if (!input) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    toast('Link copiato');
+  } catch (error) {
+    input.select();
+    toast('Copia il link selezionato');
+  }
+}
+
+function refreshDevicePairing(id) {
+  fillSheet(
+    'Nuovo link di pairing',
+    'Il link precedente smette di funzionare.',
+    `<p class="form-error" id="device-error"></p>`,
+    `<button class="btn g" data-action="close-sheet">Annulla</button><button class="btn p" data-action="confirm-create-device" data-device="${esc(id)}">Genera</button>`
+  );
+  showSheet();
+}
+
+function confirmRevokeDevice(id, name) {
+  openConfirm({
+    title: `Revocare "${name}"?`,
+    body: 'Il dispositivo perde subito l’accesso e servirà un nuovo link.',
+    label: 'Revoca',
+    danger: true,
+    onConfirm: async () => {
+      try {
+        await api('/devices/' + id, { method: 'DELETE' });
+        toast('Dispositivo revocato');
+        loadDevices();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    },
+  });
+}
+
+async function loadDevices() {
+  try {
+    const data = await api('/devices');
+    if (state.overview) state.overview.devices = data.devices || [];
+    if (state.view === 'devices') render();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+async function logout() {
+  try {
+    await api('/logout', { method: 'POST' });
+  } catch (error) {
+    /* the cookie may already be gone */
+  }
+  location.replace('/panel/login');
+}
+
+/* ---------- navigation ---------- */
+
+function setView(name) {
+  if (!VIEWS[name]) return;
+  if (isSheetOpen()) closeSheet();
+  const changed = name !== state.view;
+  state.view = name;
+  try {
+    if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  } catch (e) {
+    /* the app still works without the hash */
+  }
+  $('main').scrollTop = 0;
+  render(changed);
+  if (name === 'heating') loadHistory();
+  if (name === 'events') loadEvents();
+  if (name === 'devices') loadDevices();
+}
+
+/* ---------- events ---------- */
+
+const ACTIONS = {
+  'open-gate': (b) => confirmOpenGate(b.dataset.gate),
+  window: (b) => openWindow(Number(b.dataset.hours)),
+  'lock-gates': () => lockGates(),
+  lights: () => triggerLights(),
+  boiler: (b) => setBoiler(b.dataset.on === '1'),
+  'toggle-suspend': () => toggleSuspend(),
+  'edit-program': () => openProgramEditor(),
+  'delete-program': () => confirmDeleteProgram(),
+  'add-interval': () => addIntervalRow(),
+  'remove-interval': (b) => b.closest('.editor-row')?.remove(),
+  'save-program': () => saveProgram(),
+  'chart-range': (b) => changeRange(b.dataset.value),
+  'apply-range': () => applyRange(),
+  filter: (b) => {
+    state.eventFilter = b.dataset.value;
+    render();
+    loadEvents();
+  },
+  'select-user': (b) => {
+    state.selectedUser = Number(b.dataset.user);
+    render();
+    const detail = $('user-detail');
+    if (detail && window.innerWidth <= 1100) detail.scrollIntoView({ behavior: prefs.motion === 'full' ? 'smooth' : 'auto', block: 'start' });
+  },
+  'set-role': (b) => setRole(Number(b.dataset.user), b.dataset.role),
+  'toggle-topic': (b) => toggleTopic(Number(b.dataset.user), b.dataset.topic),
+  'edit-name': (b) => openEditName(Number(b.dataset.user)),
+  'save-name': () => saveName(),
+  'remove-user': (b) => confirmRemoveUser(Number(b.dataset.user)),
+  'add-user': () => openAddUser(),
+  'save-user': () => saveUser(),
+  'form-role': (b) => pickFormRole(b),
+  'form-switch': (b) => b.setAttribute('aria-checked', String(b.getAttribute('aria-checked') !== 'true')),
+  'add-device': () => openAddDevice(),
+  'create-device': () => createDevice(null),
+  'confirm-create-device': (b) => createDevice(b.dataset.device),
+  'refresh-device': (b) => refreshDevicePairing(b.dataset.device),
+  'revoke-device': (b) => confirmRevokeDevice(b.dataset.device, b.dataset.name),
+  'copy-link': () => copyLink(),
+  logout: () => logout(),
+  'pref-theme': (b) => {
+    savePref('theme', b.dataset.value);
+    applyTheme();
+    render();
+  },
+  'pref-motion': (b) => {
+    savePref('motion', b.dataset.value);
+    applyTheme();
+    render();
+  },
+  'pref-idle': (b) => {
+    savePref('idle', b.dataset.value);
+    render();
+  },
+  'idle-test': () => showIdle(),
+  'cycle-theme': () => cycleTheme(),
+  refresh: async () => {
+    await refresh();
+    toast('Dati aggiornati');
+  },
+  alerts: () => openAlerts(),
+  go: (b) => {
+    closeSheet();
+    if (b.dataset.target) setView(b.dataset.target);
+  },
+  'close-sheet': () => closeSheet(),
+  confirm: async () => {
+    const fn = confirmAction;
+    confirmAction = null;
+    closeSheet();
+    if (fn) await fn();
+  },
+};
+
+document.addEventListener('click', (event) => {
+  const nav = event.target.closest('[data-nav]');
+  if (nav) {
+    setView(nav.dataset.nav);
+    return;
+  }
+
+  const viewButton = event.target.closest('.nav-item[data-view], .tabs [data-view]');
+  if (viewButton) {
+    setView(viewButton.dataset.view);
+    return;
+  }
+
+  if (event.target.closest('[data-more]')) {
+    openMore();
+    return;
+  }
+
+  const button = event.target.closest('[data-action]');
+  if (!button || button.disabled) return;
+  const handler = ACTIONS[button.dataset.action];
+  if (handler) handler(button);
+});
+
+$('backdrop').addEventListener('click', closeSheet);
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && isSheetOpen()) closeSheet();
 });
 
-window.addEventListener('hashchange', () => {
-  const name = location.hash.replace('#', '');
-  if (views[name] && name !== state.view) setView(name);
+/* Any touch wakes the screen; the touch that wakes it never reaches the page below. */
+['pointerdown', 'keydown', 'wheel'].forEach((type) =>
+  document.addEventListener(
+    type,
+    (event) => {
+      state.lastInput = Date.now();
+      if (state.idle) {
+        event.preventDefault();
+        event.stopPropagation();
+        hideIdle();
+      }
+    },
+    { capture: true, passive: false }
+  )
+);
+
+$('idle').addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
 });
 
-/* ---------- clock and polling ---------- */
+window.addEventListener('hashchange', () => {
+  const name = location.hash.replace('#', '');
+  if (VIEWS[name] && name !== state.view) setView(name);
+});
 
-function updateClock() {
-  const clock = document.getElementById('clock');
-  const date = document.getElementById('clock-date');
-  const now = new Date();
-  if (clock)
-    clock.textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-  if (date)
-    date.textContent = now.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' });
+window.addEventListener('resize', movePill);
+
+if (darkQuery) {
+  const onScheme = () => {
+    if (prefs.theme === 'auto') applyTheme();
+  };
+  if (darkQuery.addEventListener) darkQuery.addEventListener('change', onScheme);
+  else if (darkQuery.addListener) darkQuery.addListener(onScheme);
+}
+
+/* ---------- polling ---------- */
+
+function canPoll() {
+  if (document.hidden || isSheetOpen()) return false;
+  const active = document.activeElement;
+  return !(active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName));
 }
 
 setInterval(() => {
-  state.now = new Date();
-  updateClock();
-}, 15000);
+  tickLive();
+  checkIdle();
+}, 1000);
 
 setInterval(() => {
-  if (isSheetOpen()) return;
-  const active = document.activeElement;
-  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
-  refresh();
+  if (canPoll()) refresh();
 }, 5000);
 
 setInterval(() => {
-  if (state.view === 'heating' && !isSheetOpen()) loadHistory();
+  if (!canPoll()) return;
+  if (state.view === 'events') loadEvents();
+}, 15000);
+
+setInterval(() => {
+  if (canPoll() && state.view === 'heating') loadHistory();
 }, 60000);
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refresh();
+});
 
 /* ---------- start ---------- */
 
+applyTheme();
 const initial = location.hash.replace('#', '');
-if (views[initial]) state.view = initial;
-render();
+if (VIEWS[initial]) state.view = initial;
+render(true);
 refresh();
 if (state.view === 'heating') loadHistory();
 if (state.view === 'events') loadEvents();

@@ -47,6 +47,7 @@ internal sealed class GateAccessService(
         db.Edit(d =>
         {
             d.GatesOpenAccessExpirationDate = null;
+            d.GatesOpenAccessStartDate = null;
             d.GateAccessUsers = [];
         });
     }

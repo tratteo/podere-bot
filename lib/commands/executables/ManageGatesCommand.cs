@@ -69,7 +69,13 @@ internal class ManageGatesCommand(
 
         if (callbackData == "confirmblock")
         {
-            database.Edit((data) => data.GatesOpenAccessExpirationDate = null);
+            database.Edit(
+                (data) =>
+                {
+                    data.GatesOpenAccessExpirationDate = null;
+                    data.GatesOpenAccessStartDate = null;
+                }
+            );
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
                 "I cancelli sono <b>bloccati</b>, solo gli amministratori possono utilizzarli.",
@@ -87,8 +93,15 @@ internal class ManageGatesCommand(
         }
         else if (int.TryParse(callbackData, out var hours) && hours > 0)
         {
+            var start = date;
             date = date.AddHours(hours);
-            database.Edit((data) => data.GatesOpenAccessExpirationDate = date);
+            database.Edit(
+                (data) =>
+                {
+                    data.GatesOpenAccessStartDate = start;
+                    data.GatesOpenAccessExpirationDate = date;
+                }
+            );
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
                 $"I cancelli sono sbloccati fino al <b>{date}</b>",

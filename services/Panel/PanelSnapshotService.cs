@@ -19,6 +19,7 @@ internal sealed class PanelSnapshotService(
     PanelDeviceService devices,
     NotificationLog log,
     UpdateStateStore updates,
+    WeatherService weather,
     IConfiguration configuration,
     IHostEnvironment environment
 )
@@ -87,6 +88,7 @@ internal sealed class PanelSnapshotService(
             ),
             new PanelGatesDto(
                 GateAccessPolicy.IsOpen(expiration, DateTime.Now),
+                data.GatesOpenAccessStartDate,
                 expiration,
                 gateAccess.Options.MaxOpenings,
                 gateAccess.Options.WindowMinutes,
@@ -120,8 +122,17 @@ internal sealed class PanelSnapshotService(
             alerts,
             log.List(3).Select(e => new PanelEventDto(e.Id, e.Topic, e.Title, e.Detail, e.At)).ToList(),
             updates.Read(),
-            SystemInfo(version)
+            SystemInfo(version),
+            Weather()
         );
+    }
+
+    private PanelWeatherDto? Weather()
+    {
+        var w = weather.Current;
+        return w == null
+            ? null
+            : new PanelWeatherDto(w.Temperature, w.Code, w.IsDay, w.Humidity, w.WindKmh, w.Min, w.Max, w.Sunrise, w.Sunset, w.UpdatedAt);
     }
 
     public IReadOnlyList<double> Trend()

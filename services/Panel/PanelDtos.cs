@@ -32,6 +32,7 @@ internal sealed record PanelGateEventDto(string Title, string? Detail, DateTime 
 
 internal sealed record PanelGatesDto(
     bool Open,
+    DateTime? OpenedAt,
     DateTime? ExpiresAt,
     int RateMax,
     int RateWindow,
@@ -83,6 +84,19 @@ internal sealed record PanelEventDto(long Id, string Topic, string Title, string
 
 internal sealed record PanelUpdateDto(string? Result, string? FromSha, string? ToSha, DateTime? LastRunUtc, string? Reason);
 
+internal sealed record PanelWeatherDto(
+    double Temperature,
+    int Code,
+    bool IsDay,
+    int? Humidity,
+    double? WindKmh,
+    double? Min,
+    double? Max,
+    DateTime? Sunrise,
+    DateTime? Sunset,
+    DateTime UpdatedAt
+);
+
 internal sealed record PanelSystemDto(long UptimeSeconds, long MemoryMb, string Environment, string Version);
 
 internal sealed record PanelSessionDto(string Mode, string? DeviceName, string? DeviceId, string Version);
@@ -100,7 +114,8 @@ internal sealed record PanelOverviewDto(
     IReadOnlyList<PanelAlertDto> Alerts,
     IReadOnlyList<PanelEventDto> Events,
     PanelUpdateDto Update,
-    PanelSystemDto System
+    PanelSystemDto System,
+    PanelWeatherDto? Weather
 );
 
 internal sealed record PanelWriteResult(bool Ok, PanelOverviewDto Overview);

@@ -140,8 +140,13 @@ internal sealed class AiToolRegistry
                         return "Non autorizzato: servono permessi admin.";
                     if (hours < 1 || hours > 24)
                         return "Le ore devono essere tra 1 e 24.";
-                    var expiration = DateTime.Now.AddHours(hours);
-                    db.Edit(d => d.GatesOpenAccessExpirationDate = expiration);
+                    var start = DateTime.Now;
+                    var expiration = start.AddHours(hours);
+                    db.Edit(d =>
+                    {
+                        d.GatesOpenAccessStartDate = start;
+                        d.GatesOpenAccessExpirationDate = expiration;
+                    });
                     return $"Cancelli sbloccati fino al {expiration:dd/MM/yyyy HH:mm}.";
                 },
                 new AIFunctionFactoryOptions { Name = "set_gate_access_hours", Description = "Abilita l'accesso ai cancelli per tutti gli utenti per un numero di ore (richiede permessi admin)" }
@@ -156,7 +161,11 @@ internal sealed class AiToolRegistry
                         return "Non autorizzato: servono permessi admin.";
                     if (!confirm)
                         return "Operazione distruttiva: chiedi conferma esplicita all'utente e richiama lo strumento con confirm=true.";
-                    db.Edit(d => d.GatesOpenAccessExpirationDate = null);
+                    db.Edit(d =>
+                    {
+                        d.GatesOpenAccessExpirationDate = null;
+                        d.GatesOpenAccessStartDate = null;
+                    });
                     return "Cancelli bloccati. Solo gli amministratori possono utilizzarli.";
                 },
                 new AIFunctionFactoryOptions { Name = "lock_gates", Description = "Blocca l'accesso ai cancelli per tutti gli utenti non admin (richiede permessi admin)" }

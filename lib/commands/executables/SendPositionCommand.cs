@@ -10,14 +10,10 @@ internal class SendPositionCommand(
     UserDirectory users
 ) : Command(logger, configuration, users)
 {
+    private readonly HomeOptions home = OptionsReader.ReadHome(configuration);
+
     protected override async Task ExecuteInternal()
     {
-        await Arguments.Client.SendVenue(
-            Arguments.Message.Chat.Id,
-            41.4986180363405,
-            12.797875896442752,
-            "Podere 739 (canne libere 🪴)",
-            "Via del Valloncello 16"
-        );
+        await Arguments.Client.SendVenue(Arguments.Message.Chat.Id, home.Latitude, home.Longitude, home.Name, home.Address);
     }
 }
