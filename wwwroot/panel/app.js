@@ -122,10 +122,10 @@ async function loadHistory() {
         ? '?range=custom&from=' + encodeURIComponent(state.customFrom) + '&to=' + encodeURIComponent(state.customTo)
         : '?range=' + state.historyRange;
     state.history = await api('/history' + query);
-    if (state.view === 'heating') renderHeating();
+    if (state.view === 'heating' && state.overview) renderHeating();
   } catch (error) {
     state.history = { error: error.message, points: [] };
-    if (state.view === 'heating') renderHeating();
+    if (state.view === 'heating' && state.overview) renderHeating();
   }
 }
 
@@ -280,10 +280,43 @@ function sensorState(sensor) {
   return sensor.fresh ? 'ok' : 'stale';
 }
 
+/** Hero tint: the temperature decides the shade, from cold blue to warm red. */
+function temperatureShade(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+  const stops = [
+    { at: 0, rgb: [78, 122, 178] },
+    { at: 12, rgb: [86, 163, 128] },
+    { at: 20, rgb: [196, 146, 70] },
+    { at: 30, rgb: [196, 106, 96] },
+  ];
+  const v = Math.max(0, Math.min(30, Number(value)));
+  let from = stops[0];
+  let to = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i += 1) {
+    if (v >= stops[i].at && v <= stops[i + 1].at) {
+      from = stops[i];
+      to = stops[i + 1];
+      break;
+    }
+  }
+  const k = (v - from.at) / (to.at - from.at || 1);
+  const tint = from.rgb.map((c, i) => c + (to.rgb[i] - c) * k);
+  const base = [19, 23, 20];
+  const weight = 0.14;
+  return `rgb(${tint.map((c, i) => Math.round(base[i] * (1 - weight) + c * weight)).join(',')})`;
+}
+
 /* ---------- render ---------- */
 
 function render() {
   document.querySelectorAll('.nav-item, .tabs button').forEach((b) => {
+    if (b.dataset.more) {
+      const active = ['system', 'users', 'devices'].includes(state.view);
+      b.classList.toggle('active', active);
+      if (active) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+      return;
+    }
     const active = b.dataset.view === state.view;
     b.classList.toggle('active', active);
     if (active) b.setAttribute('aria-current', 'page');
@@ -319,21 +352,16 @@ function renderStatus() {
   const health = overview?.health;
   const tg = document.getElementById('tg-pill');
   const db = document.getElementById('db-pill');
-  const mobile = document.getElementById('mobile-pill');
-  const cpu = document.getElementById('cpu-pill');
+  const cpu = document.getElementById('cpu-value');
   const version = document.getElementById('rail-version');
   const mode = document.getElementById('rail-mode');
   const logout = document.getElementById('logout-pill');
 
-  if (tg) tg.className = 'pill desktop-status ' + (health?.telegramOk ? 'ok' : 'alert');
-  if (db) db.className = 'pill desktop-status ' + (health?.databaseOk ? 'ok' : 'alert');
-  if (mobile) {
-    const online = Boolean(health?.coreOk) && !state.offline;
-    mobile.className = 'pill mobile-status ' + (online ? 'ok' : 'alert');
-    mobile.querySelector('span:last-child').textContent = online ? 'Online' : 'Offline';
-  }
+  if (tg) tg.classList.toggle('alert', !health?.telegramOk);
+  if (db) db.classList.toggle('alert', !health?.databaseOk);
   if (cpu) cpu.textContent = health?.cpuTemperatureCelsius ? `${fmt(health.cpuTemperatureCelsius)} °C` : '—';
-  if (version) version.textContent = 'v' + (overview?.system?.version || CONFIG.version || '—');
+  const versionValue = overview?.system?.version || CONFIG.version || '—';
+  if (version) version.textContent = versionValue === 'locale' ? 'locale' : 'v' + versionValue;
   if (mode) mode.textContent = CONFIG.mode === 'kiosk' ? 'Kiosk locale' : 'Rete locale';
   if (logout) logout.hidden = CONFIG.mode !== 'lan';
 
@@ -366,7 +394,6 @@ function renderHome() {
   const trend = t?.trend || [];
   const delta = trend.length > 1 ? trend[trend.length - 1] - trend[0] : 0;
   const trendUp = delta >= 0;
-  const outside = sensors.find((s) => /estern/i.test(s.location));
 
   const progBadge = h.program.suspended
     ? `<span class="badge warn">Sospeso</span>`
@@ -382,76 +409,75 @@ function renderHome() {
       : h.program.intervals.length
         ? 'Spento'
         : 'Manuale';
+  const shade = temperatureShade(h.temperature);
 
   document.getElementById('home-view').innerHTML = `
+    <div class="actions">
+      <button class="tile primary" data-action="open-gate" data-gate="automatic">${icon('gate')}<span>Automatico</span></button>
+      <button class="tile" data-action="open-gate" data-gate="pedestrian">${icon('walk')}<span>Pedonale</span></button>
+      <button class="tile" data-action="lights">${icon('sun')}<span>Luci</span></button>
+      <button class="tile" data-action="window" data-hours="2">${icon('clock')}<span>Finestra</span><small>${g.open ? 'aperta' : '2 h'}</small></button>
+    </div>
+
     <div class="home-grid">
-      <section class="card hero">
-        <div class="kicker">Temperatura operativa</div>
+      <section class="card hero"${shade ? ` style="background:${shade}"` : ''}>
+        <div class="card-head">
+          <div class="kicker">Temperatura operativa</div>
+          <span class="badge muted">12 h</span>
+        </div>
         <div class="temp-row"><span class="temp">${fmt(h.temperature)}</span><span class="unit">°C</span></div>
         <div class="trend-row">
           <span class="trend ${trendUp ? 'up' : 'down'}">${icon(trendUp ? 'arrow-up' : 'arrow-down')}${trendUp ? '+' : ''}${fmt(delta)} °C</span>
           <span>nelle ultime 12 ore</span>
         </div>
-        <div class="spark">${trend.length > 1 ? sparkline(trend) : `<div class="empty">${icon('activity')}<span>Storico in raccolta.</span></div>`}</div>
-        <div class="hero-foot">
-          <div class="boiler-state">
-            <span class="state-icon ${h.boilerActive ? 'on' : ''}">${icon('flame', 'fill')}</span>
-            <div class="boiler-text"><b>Caldaia ${h.boilerActive ? 'accesa' : 'spenta'}</b><span>${h.boilerActive ? 'da ' + duration(h.boilerOnMinutes) : 'in attesa'}</span></div>
-          </div>
-          <span class="chip">${icon('snow')} Antigelo soglia ${fmt(h.antifreezeThreshold)} °C</span>
-        </div>
-        <div class="mini-stats">
-          <span><b>${activeSensors}/${sensors.length}</b> sensori</span>
-          <span>Esterno <b>${outside ? fmt(outside.temperature) + ' °C' : 'n/d'}</b></span>
-          <span>Aggiornato <b>${relative(t?.updatedAt)}</b></span>
+        <div class="spark">${trend.length > 1 ? sparkline(trend) : '<div class="spark-empty">Storico in raccolta</div>'}</div>
+        <div class="strip">
+          <div><span class="label">Caldaia</span><b>${h.boilerActive ? 'accesa' : 'spenta'}</b><span class="note">${h.boilerActive ? 'da ' + duration(h.boilerOnMinutes) : 'in attesa'}</span></div>
+          <div><span class="label">Antigelo</span><b>${fmt(h.antifreezeThreshold)} °C</b><span class="note">${h.antifreezeEnabled ? 'soglia attiva' : 'disattivato'}</span></div>
+          <div><span class="label">Sensori</span><b>${activeSensors} / ${sensors.length}</b><span class="note">${staleSensors ? `${staleSensors} in ritardo` : 'tutti ok'}</span></div>
         </div>
       </section>
 
-      <section class="card gates-card">
+      <section class="card">
         <div class="card-head">
-          <div><div class="kicker">Cancelli</div><div class="value">${g.open ? 'Sbloccati' : 'Bloccati'}</div></div>
-          <span class="badge ${g.open ? 'ok' : 'muted'}">${g.open ? `fino alle ${fmtTime(g.expiresAt)}` : 'solo admin'}</span>
+          <div><div class="kicker">Eventi</div><div class="value">Oggi</div></div>
+          <button class="link" data-nav="events">Vedi tutti ${icon('chevron')}</button>
         </div>
-        <div class="gate-actions">
-          <button class="btn gate" data-action="open-gate" data-gate="automatic">${icon('gate')} Automatico</button>
-          <button class="btn gate" data-action="open-gate" data-gate="pedestrian">${icon('walk')} Pedonale</button>
-        </div>
-        <div class="card-foot">Ultima attività: ${g.recent[0] ? esc(g.recent[0].title) : 'nessuna'}</div>
+        ${state.overview.events.length ? `<ul class="event-list compact">${state.overview.events.slice(0, 3).map(eventRow).join('')}</ul>` : `<div class="empty">${icon('bell')}<span>Nessun evento registrato.</span></div>`}
       </section>
 
-      <section class="card program-card">
+      <section class="card">
         <div class="card-head">
           <div><div class="kicker">Programma</div><div class="value">${progValue}</div></div>
           ${progBadge}
         </div>
         ${timeline(h.program.intervals, true)}
+        ${h.program.intervals
+          .map(
+            (i) =>
+              `<div class="interval-row home-ival"><span class="interval-time">${minutesToTime(i.from)}–${minutesToTime(i.to)}</span><span class="interval-temp">${fmt(i.temperature)}°</span></div>`
+          )
+          .join('')}
         <div class="card-foot">${h.program.suspended ? 'Programma sospeso' : nextLabel(next)}</div>
       </section>
 
-      <section class="card events-card">
+      <section class="card">
         <div class="card-head">
-          <div><div class="kicker">Eventi</div><div class="value">Recenti</div></div>
-          <button class="link" data-nav="events">Vedi tutti ${icon('chevron')}</button>
-        </div>
-        ${state.overview.events.length ? `<ul class="event-list compact">${state.overview.events.map(eventRow).join('')}</ul>` : `<div class="empty">${icon('bell')}<span>Nessun evento registrato.</span></div>`}
-      </section>
-
-      <section class="card sensors-card">
-        <div class="card-head">
-          <div><div class="kicker">Sensori</div><div class="value">${activeSensors}/${sensors.length} attivi</div></div>
+          <div><div class="kicker">Sensori</div><div class="value">${activeSensors} / ${sensors.length} attivi</div></div>
           <span class="badge ${staleSensors ? 'warn' : 'ok'}">${staleSensors ? `${staleSensors} in ritardo` : 'tutti ok'}</span>
         </div>
-        ${sensors.length ? `<div class="sensor-grid">${sensors.map(sensorCell).join('')}</div>` : `<div class="empty">${icon('wifi')}<span>Nessun sensore configurato.</span></div>`}
+        ${sensors.length ? `<div class="sen-list">${sensors.map(sensorLine).join('')}</div>` : `<div class="empty">${icon('wifi')}<span>Nessun sensore configurato.</span></div>`}
       </section>
     </div>`;
 }
 
-function sensorCell(s) {
-  return `<div class="sensor ${sensorState(s)}"><b>${fmt(s.temperature)}°</b><span>${esc(s.location)} · ${relative(s.timestamp)}</span></div>`;
+function sensorLine(s) {
+  return `<div class="sen ${sensorState(s)}"><span class="sen-name">${esc(s.location)}</span><span class="sen-val">${fmt(s.temperature)}°</span><span class="sen-age">${relative(s.timestamp)}</span></div>`;
 }
 
 function renderHeating() {
   const h = heating();
+  if (!h) return;
   const t = temperatures();
   const interval = currentInterval();
   const next = nextChange();
@@ -573,16 +599,21 @@ function renderGates() {
       <section class="card gates-hero">
         <div class="gate-status">
           <span class="state-icon ${g.open ? 'ok' : 'locked'}">${icon(g.open ? 'unlock' : 'lock')}</span>
-          <div><div class="kicker">Finestra</div><div class="value">${g.open ? 'Sbloccati' : 'Bloccati'}</div><div class="muted">${g.open ? 'Accesso aperto a tutti' : 'Solo admin e gate_controller'}</div></div>
+          <div><div class="kicker">Finestra</div><div class="value">${g.open ? 'Sbloccati' : 'Bloccati'}</div><div class="muted">${g.open ? `Accesso aperto fino alle ${fmtTime(g.expiresAt)}` : 'Solo admin e gate_controller'}</div></div>
         </div>
         <div class="window-buttons">
-          <button class="btn" data-action="window" data-hours="1">1 ora</button>
-          <button class="btn" data-action="window" data-hours="2">2 ore</button>
-          <button class="btn" data-action="window" data-hours="4">4 ore</button>
-          <button class="btn" data-action="window" data-hours="8">8 ore</button>
-          <button class="btn danger" data-action="lock-gates" ${g.open ? '' : 'disabled'}>${icon('lock')} Blocca cancelli</button>
-          <button class="btn ghost" data-action="lights">${icon('sun')} Luci</button>
+          ${[1, 2, 4, 8, 12, 24].map((h) => `<button class="btn" data-action="window" data-hours="${h}">${h} h</button>`).join('')}
         </div>
+        <button class="btn danger" data-action="lock-gates" ${g.open ? '' : 'disabled'}>${icon('lock')} Blocca i cancelli</button>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div><div class="kicker">Illuminazione</div><div class="value">Luci dei cancelli</div></div>
+          <span class="badge muted">impulso breve</span>
+        </div>
+        <p class="muted" style="margin:0;font-size:12px">Accende le luci esterne per pochi istanti, indipendente dalla finestra di accesso.</p>
+        <button class="btn" data-action="lights">${icon('sun')} Attiva luci</button>
       </section>
 
       <section class="card">
@@ -724,8 +755,8 @@ function userCard(u) {
 
   return `<section class="card user-card">
     <div class="user-head">
-      <span class="avatar">${esc(initials(label))}</span>
-      <div class="user-main"><b>${esc(label)}</b><span>ID ${u.id}${u.runtimeOnly ? ' · runtime' : ''}</span></div>
+      <span class="avatar">${u.name ? esc(initials(u.name)) : icon('users')}</span>
+      <div class="user-main"><b>${esc(label)}</b><span>${u.name ? 'ID ' + u.id : 'nome non disponibile'}</span></div>
       <button class="icon-btn" data-action="edit-name" data-user="${u.id}" aria-label="Modifica il nome di ${esc(label)}" title="Modifica nome">${icon('edit')}</button>
       <button class="icon-btn danger" data-action="remove-user" data-user="${u.id}" aria-label="Rimuovi ${esc(label)}" title="${lastAdmin ? 'Serve almeno un admin' : ''}">${icon('trash')}</button>
     </div>
@@ -756,7 +787,7 @@ function renderDevices() {
     <div class="stack">
       <section class="card">
         <div class="card-head user-view-head">
-          <div><div class="kicker">Dispositivi</div><div class="value">${devices.length} autorizzati · ${active} attivi</div></div>
+          <div><div class="kicker">Dispositivi</div><div class="value">${devices.length} ${devices.length === 1 ? 'autorizzato' : 'autorizzati'} · ${active} ${active === 1 ? 'attivo' : 'attivi'}</div></div>
           <button class="btn primary" data-action="add-device">${icon('plus')} Aggiungi dispositivo</button>
         </div>
         <p class="muted" style="margin:10px 0 0;font-size:12px">Ogni dispositivo entra con un link monouso mostrato come QR code. Il nome è un'etichetta: l'identità è la chiave consegnata al dispositivo. Gli indirizzi IP e i nomi di rete non vengono usati.</p>
@@ -802,9 +833,14 @@ function deviceCard(d) {
 function eventRow(e) {
   const meta = EVENT_TOPICS[e.topic] || { icon: 'activity' };
   const cls = e.topic === 'heating' ? 'heating' : e.topic === 'gates' ? 'gates' : e.topic === 'panel' ? 'panel' : 'technical';
+  const strip = (value) =>
+    String(value ?? '')
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   return `<li class="event ${cls}">
     <span class="event-icon">${icon(meta.icon, e.topic === 'heating' ? 'fill' : '')}</span>
-    <span class="event-main"><b>${esc(e.title)}</b><span>${esc(e.detail || '')}</span></span>
+    <span class="event-main"><b>${esc(strip(e.title))}</b><span>${esc(strip(e.detail))}</span></span>
     <span class="event-time">${relative(e.at)}</span>
   </li>`;
 }
@@ -917,15 +953,9 @@ function temperatureChart() {
     <div class="chart-y">${yLabels}</div>
     <div class="chart-plot">
       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
-        <defs>
-          <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#f5a524" stop-opacity=".22"/>
-            <stop offset="1" stop-color="#f5a524" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
         ${grid}
-        <path d="${band}" fill="rgba(245,165,36,.10)"/>
-        <path d="${line}" fill="none" stroke="#f5a524" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+        <path d="${band}" fill="rgba(224,163,67,.10)"/>
+        <path d="${line}" fill="none" stroke="#e0a343" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
       </svg>
       <span class="chart-dot" style="left:${(x(last.at) / W) * 100}%;top:${(y(last.avg) / H) * 100}%"></span>
     </div>
@@ -1318,10 +1348,23 @@ async function toggleRole(userId, role) {
     return;
   }
 
+  // Optimistic: the switch flips immediately, the server confirms right after.
+  const before = {
+    entitlements: [...user.entitlements],
+    isAdmin: user.isAdmin,
+    isGateController: user.isGateController,
+  };
+  user.entitlements = entitlements;
+  user.isAdmin = entitlements.includes('admin');
+  user.isGateController = user.isAdmin || entitlements.includes('gate_controller');
+  renderUsers();
+
   try {
     await write('/users/' + userId, { method: 'PATCH', body: { name: user.name, entitlements, topics: user.topics } });
     toast(`${ROLES[role].label} ${has ? 'revocato' : 'concesso'}`);
   } catch (error) {
+    Object.assign(user, before);
+    renderUsers();
     toast(error.message);
   }
 }
@@ -1331,10 +1374,17 @@ async function toggleTopic(userId, topic) {
   if (!user) return;
   const has = user.topics.includes(topic);
   const topics = has ? user.topics.filter((t) => t !== topic) : [...user.topics, topic];
+
+  const before = [...user.topics];
+  user.topics = topics;
+  renderUsers();
+
   try {
     await write('/users/' + userId, { method: 'PATCH', body: { name: user.name, entitlements: user.entitlements, topics } });
     toast(`Topic ${TOPICS[topic].label} ${has ? 'disattivato' : 'attivato'}`);
   } catch (error) {
+    user.topics = before;
+    renderUsers();
     toast(error.message);
   }
 }
@@ -1560,8 +1610,22 @@ async function applyRange() {
 
 /* ---------- navigation ---------- */
 
+function openMore() {
+  document.getElementById('sheet-title').textContent = 'Altre sezioni';
+  document.getElementById('sheet-body').textContent = 'Sistema, utenti e dispositivi.';
+  document.getElementById('sheet-content').innerHTML = `<div class="more-grid">
+    <button class="btn" data-nav="system">${icon('gear')} Sistema</button>
+    <button class="btn" data-nav="users">${icon('users')} Utenti</button>
+    <button class="btn" data-nav="devices">${icon('device')} Dispositivi</button>
+  </div>`;
+  document.getElementById('sheet-actions').innerHTML = `<button class="btn ghost" data-action="close-sheet">Chiudi</button>`;
+  confirmAction = null;
+  showSheet();
+}
+
 function setView(name) {
   if (!views[name]) return;
+  if (isSheetOpen()) closeSheet();
   state.view = name;
   try {
     if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
@@ -1587,6 +1651,12 @@ document.addEventListener('click', async (event) => {
   const viewButton = event.target.closest('[data-view]');
   if (viewButton && (viewButton.classList.contains('nav-item') || viewButton.closest('.tabs'))) {
     setView(viewButton.dataset.view);
+    return;
+  }
+
+  const moreButton = event.target.closest('[data-more]');
+  if (moreButton) {
+    openMore();
     return;
   }
 
@@ -1668,9 +1738,12 @@ window.addEventListener('hashchange', () => {
 
 function updateClock() {
   const clock = document.getElementById('clock');
-  if (!clock) return;
+  const date = document.getElementById('clock-date');
   const now = new Date();
-  clock.textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  if (clock)
+    clock.textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  if (date)
+    date.textContent = now.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' });
 }
 
 setInterval(() => {
@@ -1696,3 +1769,4 @@ if (views[initial]) state.view = initial;
 render();
 refresh();
 if (state.view === 'heating') loadHistory();
+if (state.view === 'events') loadEvents();
