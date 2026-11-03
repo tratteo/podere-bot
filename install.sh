@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 export GIT_TERMINAL_PROMPT=0
+trap 'rc=$?; echo "install.sh: [$BASH_COMMAND] failed at line $LINENO (exit $rc)" >&2' ERR
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORIG_ARGS=("$@")
@@ -175,7 +176,10 @@ if [ -f "$ROOT/build/version.json" ]; then
     build_sha="$(sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/build/version.json" | head -n1)"
 fi
 install_hash="$(sha256sum "$ROOT/install.sh" | cut -d' ' -f1)"
-recorded_install="$(sed -n 's/^install_sha=//p' "$ROOT/.install-state" 2>/dev/null | head -n1)"
+recorded_install=""
+if [ -f "$ROOT/.install-state" ]; then
+    recorded_install="$(sed -n 's/^install_sha=//p' "$ROOT/.install-state" | head -n1)"
+fi
 units_changed=0
 if [ -z "$recorded_install" ] || [ "$recorded_install" != "$install_hash" ]; then
     units_changed=1
