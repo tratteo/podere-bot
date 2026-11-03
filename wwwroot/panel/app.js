@@ -1527,32 +1527,25 @@ function temperatureChart() {
       const points = asPoints(s.points, (p) => p.value);
       if (!points.length) return '';
       const color = seriesColor(s.id);
-      if (points.length === 1)
-        return `<circle cx="${points[0].x.toFixed(1)}" cy="${points[0].y.toFixed(1)}" r="2.2" fill="currentColor" style="color:${color}"/>`;
+      if (points.length < 2) return '';
       const dash = seriesDash(s.id);
       return `<path d="${monotonePath(points)}" fill="none" stroke="currentColor" style="color:${color}" stroke-width="1.8" stroke-opacity=".95" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke"/>`;
     })
     .join('');
-  const avgDots = drawAvg
-    ? avgPoints
-        .map(
-          (p) =>
-            `<circle cx="${x(p.at.getTime()).toFixed(1)}" cy="${y(p.avg).toFixed(1)}" r="2.1" fill="currentColor" style="color:var(--series-avg)" fill-opacity=".85"/>`
-        )
-        .join('')
-    : '';
+  // Samples are HTML dots, not SVG circles: the chart stretches a 640 unit viewBox across the
+  // full width, so a circle in user units would render as an ellipse.
+  const sampleDots = (points, color) =>
+    points
+      .map(
+        (point) =>
+          `<i class="chart-sample" aria-hidden="true" style="left:${((point.x / W) * 100).toFixed(2)}%;top:${point.y.toFixed(1)}px;background:${color}"></i>`
+      )
+      .join('');
+  const avgDots = drawAvg ? sampleDots(asPoints(avgPoints, (p) => p.avg), 'var(--series-avg)') : '';
   const sensorDots = series
-    .map((s) => {
-      if (s.points.length === 1) return '';
-      const color = seriesColor(s.id);
-      return s.points
-        .map((p) => {
-          const at = new Date(p.at);
-          return `<circle cx="${x(at.getTime()).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="1.9" fill="currentColor" style="color:${color}" fill-opacity=".8"/>`;
-        })
-        .join('');
-    })
+    .map((s) => sampleDots(asPoints(s.points, (p) => p.value), seriesColor(s.id)))
     .join('');
+
   const grid = [1, 2, 3].map((i) => `<line x1="0" y1="${(H / 4) * i}" x2="${W}" y2="${(H / 4) * i}" stroke="currentColor" stroke-opacity=".07" vector-effect="non-scaling-stroke"/>`).join('');
 
   const yLabels = [0, 1, 2, 3, 4].map((i) => `<span>${(yMax - ((yMax - yMin) / 4) * i).toFixed(1)}°</span>`).join('');
@@ -1605,8 +1598,8 @@ function temperatureChart() {
           ${band ? `<path d="${band}" fill="currentColor" style="color:var(--series-avg)" fill-opacity=".08"/>` : ''}
           ${sensorLines}
           ${avgLine ? `<path d="${avgLine}" fill="none" stroke="currentColor" style="color:var(--series-avg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
-          ${avgDots}${sensorDots}
         </svg>
+        ${avgDots}${sensorDots}
         ${last ? `<span class="chart-dot" style="left:${((x(last.at.getTime()) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px;background:var(--series-avg)"></span>` : ''}
         <span class="chart-cursor" hidden></span>
         <div class="chart-tip" hidden></div>
@@ -2044,13 +2037,23 @@ function gateName(gate) {
 
 function confirmOpenGate(gate) {
   if (state.gateAnim) return;
-  openConfirm({
-    title: `Aprire il cancello ${gateName(gate)}?`,
-    body: 'Si apre per pochi secondi.',
-    label: 'Apri',
-    ic: gate === 'automatic' ? 'car' : 'walk',
-    onConfirm: () => openGate(gate),
-  });
+  const g = gates();
+  const automatic = gate === 'automatic';
+  // A dedicated sheet: opening a gate is the one action that moves something in the real world,
+  // so it gets the name, what happens next and the state of the access window.
+  fillSheet(
+    'Aprire il cancello',
+    '',
+    `<div class="gate-confirm">
+      <span class="gate-confirm-ico">${icon(automatic ? 'car' : 'walk')}</span>
+      <b>${automatic ? 'Cancello carraio' : 'Cancello pedonale'}</b>
+      <small>Resta aperto pochi secondi, poi si richiude da solo.</small>
+      ${g && g.open ? '<span class="badge ok">Finestra aperta</span>' : '<span class="badge">Finestra chiusa</span>'}
+    </div>`,
+    `<button class="btn g" data-action="close-sheet">Annulla</button><button class="btn p" data-action="confirm">${icon('gate')}Apri</button>`
+  );
+  showSheet();
+  confirmAction = () => openGate(gate);
 }
 
 async function openGate(gate) {
