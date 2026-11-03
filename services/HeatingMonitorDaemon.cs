@@ -21,9 +21,7 @@ internal sealed class HeatingMonitorDaemon(
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Max(5, configuration.GetValue<int?>("Heating:MonitorIntervalSeconds") ?? 30)
     );
-    private readonly TimeSpan sensorTolerance = TimeSpan.FromSeconds(
-        Math.Max(10, configuration.GetValue<int?>("Heating:TempSensorsToleranceSeconds") ?? 60)
-    );
+    private readonly TimeSpan alertWindow = OptionsReader.ReadSensorAlertWindow(configuration);
 
     private readonly TimeSpan antifreezeNotifyCooldown = TimeSpan.FromMinutes(
         Math.Max(0, configuration.GetValue<int?>("Heating:Antifreeze:NotifyCooldownMinutes") ?? 15)
@@ -193,7 +191,7 @@ internal sealed class HeatingMonitorDaemon(
         // Only operational sensors raise control alerts: informational readings are not used for control.
         var all = temperatureDriver.GetExternalTemperatureReadings();
         var known = all.Where(r => !r.Informational && !r.HasError).ToList();
-        var fresh = temperatureDriver.GetExternalTemperatureReadings(sensorTolerance).Where(r => !r.Informational).ToList();
+        var fresh = temperatureDriver.GetExternalTemperatureReadings(alertWindow).Where(r => !r.Informational).ToList();
         var freshIds = fresh.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var failed = all.Where(r => r.HasError).ToList();
         var failedIds = failed.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);

@@ -135,6 +135,10 @@ internal static class OptionsReader
         );
     }
 
+    /// <summary>How long a sensor may stay silent before the stale alert, independent from the average window.</summary>
+    public static TimeSpan ReadSensorAlertWindow(IConfiguration configuration) =>
+        TimeSpan.FromMinutes(Math.Max(1, configuration.GetValue<int?>("Heating:SensorAlertMinutes") ?? 10));
+
     public static PanelEventOptions ReadPanelEvents(IConfiguration configuration)
     {
         var section = configuration.GetSection("Panel:Events");

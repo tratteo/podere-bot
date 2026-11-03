@@ -47,6 +47,7 @@ internal sealed record PanelSensorDto(
     DateTime Timestamp,
     bool Informational,
     bool Fresh,
+    bool Stale,
     string? Status,
     string? Error
 );

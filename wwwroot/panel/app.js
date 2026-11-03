@@ -431,7 +431,8 @@ function boilerOn() {
 function sensorState(sensor) {
   if (sensor.status) return 'error';
   if (sensor.informational) return 'info';
-  return sensor.fresh ? 'ok' : 'stale';
+  if (sensor.stale) return 'stale';
+  return 'ok';
 }
 
 const LOCAL_STATUS = {

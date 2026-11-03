@@ -27,6 +27,7 @@ internal sealed class PanelSnapshotService(
     private readonly TimeSpan sensorTolerance = TimeSpan.FromSeconds(
         Math.Max(10, configuration.GetValue<int?>("Heating:TempSensorsToleranceSeconds") ?? 60)
     );
+    private readonly TimeSpan alertWindow = OptionsReader.ReadSensorAlertWindow(configuration);
 
     public async Task<PanelOverviewDto> BuildAsync(
         string mode,
@@ -43,6 +44,10 @@ internal sealed class PanelSnapshotService(
             .GetExternalTemperatureReadings(sensorTolerance)
             .Select(r => r.Id)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var alertFresh = temperatureReader
+            .GetExternalTemperatureReadings(alertWindow)
+            .Select(r => r.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var sensors = external
             .Select(r => new PanelSensorDto(
@@ -52,6 +57,7 @@ internal sealed class PanelSnapshotService(
                 r.Timestamp,
                 r.Informational,
                 fresh.Contains(r.Id),
+                !alertFresh.Contains(r.Id),
                 r.Status,
                 r.Error
             ))
@@ -176,7 +182,7 @@ internal sealed class PanelSnapshotService(
             .Alerts.Select(a => new PanelAlertDto(a.Id, a.Title, a.Detail, a.Target))
             .ToList();
 
-        foreach (var sensor in sensors.Where(s => !s.Informational && !s.Fresh))
+        foreach (var sensor in sensors.Where(s => !s.Informational && s.Stale))
             alerts.Add(
                 new PanelAlertDto(
                     $"sensor-{sensor.Id}",
