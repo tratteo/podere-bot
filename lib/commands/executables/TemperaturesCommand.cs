@@ -75,9 +75,10 @@ internal class TemperaturesCommand(
         sb.AppendLine();
         sb.AppendLine($"🏠 <b>Host</b> · {FormatTemperature(probe.Temperature)}");
         var outdoor = await weather.GetAsync(TimeSpan.FromSeconds(3));
+        var humidity = outdoor?.Humidity is int relativeHumidity ? $" · {relativeHumidity}% UR" : "";
         sb.AppendLine(
             outdoor != null
-                ? $"🌤️ <b>Esterno (Open-Meteo)</b> · {outdoor.Temperature.ToString("0.0", Culture)} °C"
+                ? $"🌤️ <b>Esterno (Open-Meteo)</b> · {outdoor.Temperature.ToString("0.0", Culture)} °C{humidity}"
                 : "🌤️ <b>Esterno (Open-Meteo)</b> · <i>non disponibile</i>"
         );
         if (externals.Count == 0)

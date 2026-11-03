@@ -752,7 +752,8 @@ function miniOutdoor() {
   }
   const info = weatherInfo(w.code, w.isDay);
   const range = w.min !== null && w.min !== undefined ? `<span class="mono">${fmt(w.min)}–${fmt(w.max)}°</span>` : '';
-  return `<div class="mini wx"><span class="sico b">${icon(info.icon)}</span><div><div class="k">Esterno · ${info.label.toLowerCase()}</div><div class="mini-value"><b class="mono">${fmt(w.temperature)}°</b>${range}</div></div></div>`;
+  const humidity = w.humidity === null || w.humidity === undefined ? '' : `<span class="mono">${w.humidity}%</span>`;
+  return `<div class="mini wx"><span class="sico b">${icon(info.icon)}</span><div><div class="k">Esterno · ${info.label.toLowerCase()}</div><div class="mini-value"><b class="mono">${fmt(w.temperature)}°</b>${range}${humidity}</div></div></div>`;
 }
 
 function programSummary() {
@@ -1130,7 +1131,7 @@ function renderSystem() {
               return healthRow('wifi', st === 'ok' ? 'b' : st === 'stale' ? 'a' : '', esc(s.location), `<span class="mono">${fmt(s.temperature)}°</span> · ${relative(s.timestamp)}`);
             })
             .join('')}
-          ${healthRow('cloud', w ? 'b' : '', 'Esterno (Open-Meteo)', w ? `<span class="mono">${fmt(w.temperature)}°</span> · ${relative(w.updatedAt)}` : 'Non disponibile')}
+          ${healthRow('cloud', w ? 'b' : '', 'Esterno (Open-Meteo)', w ? `<span class="mono">${fmt(w.temperature)}°</span>${w.humidity !== null && w.humidity !== undefined ? ` · ${w.humidity}%` : ''} · ${relative(w.updatedAt)}` : 'Non disponibile')}
         </div>
       </section>
     </div>

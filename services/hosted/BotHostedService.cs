@@ -249,9 +249,10 @@ internal class BotHostedService : IHostedService
         else
             sb.AppendLine($"🌡️ Locale: <b>non disponibile</b> <i>({TemperatureCause(probe.Status)})</i>");
         var outdoor = await weather.GetAsync(TimeSpan.FromSeconds(8), cancellationToken);
+        var humidity = outdoor?.Humidity is int relativeHumidity ? $" · {relativeHumidity}% UR" : "";
         sb.AppendLine(
             outdoor != null
-                ? $"🌤️ Esterno: <b>{outdoor.Temperature:0.0} °C</b> <i>(Open-Meteo)</i>"
+                ? $"🌤️ Esterno: <b>{outdoor.Temperature:0.0} °C</b>{humidity} <i>(Open-Meteo)</i>"
                 : "🌤️ Esterno: <b>non disponibile</b> <i>(Open-Meteo)</i>"
         );
         sb.AppendLine($"📡 Sensori esterni: {DescribeExternal(external.Count, fresh.Count)}");
