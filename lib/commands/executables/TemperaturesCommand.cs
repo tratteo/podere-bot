@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using PodereBot.Services;
+using PodereBot.Services.Panel;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -13,7 +14,8 @@ internal class TemperaturesCommand(
     ILogger<StartCommand> logger,
     IConfiguration configuration,
     ITemperatureDriver temperatureDriver,
-    UserDirectory users
+    UserDirectory users,
+    WeatherService weather
 ) : Command(logger, configuration, users)
 {
     private static readonly CultureInfo Culture = CultureInfo.GetCultureInfo("it-IT");
@@ -72,8 +74,14 @@ internal class TemperaturesCommand(
         sb.AppendLine(probe.Status == LocalTemperatureStatus.Ok ? "🟢 <b>Temperature</b>" : "🔴 <b>Temperature</b>");
         sb.AppendLine();
         sb.AppendLine($"🏠 <b>Host</b> · {FormatTemperature(probe.Temperature)}");
+        var outdoor = await weather.GetAsync(TimeSpan.FromSeconds(3));
+        sb.AppendLine(
+            outdoor != null
+                ? $"🌤️ <b>Esterno (Open-Meteo)</b> · {outdoor.Temperature.ToString("0.0", Culture)} °C"
+                : "🌤️ <b>Esterno (Open-Meteo)</b> · <i>non disponibile</i>"
+        );
         if (externals.Count == 0)
-            sb.AppendLine("📡 <i>Nessun sensore esterno.</i>");
+            sb.AppendLine("📡 <i>Nessun sensore remoto.</i>");
         foreach (var reading in externals)
         {
             var age = FormatAge(DateTime.UtcNow - reading.Timestamp);
