@@ -431,6 +431,20 @@ function sensorState(sensor) {
   return sensor.fresh ? 'ok' : 'stale';
 }
 
+const LOCAL_STATUS = {
+  Ok: 'ok',
+  DevicesRootMissing: 'bus assente',
+  BusMasterMissing: 'bus senza master',
+  NoSensors: 'nessun sensore',
+  CrcError: 'errore CRC',
+  ReadError: 'errore di lettura',
+  ParseError: 'errore di formato',
+};
+
+function localStatusLabel(status) {
+  return LOCAL_STATUS[status] || status;
+}
+
 function lightsLit() {
   return state.lightsUntil > Date.now();
 }
@@ -1093,7 +1107,15 @@ function renderSystem() {
   const health = o.health;
   const usage = o.usage;
   const sensors = o.temperatures.sensors;
+  const localOk = o.temperatures.localStatus === 'Ok';
   const stale = sensors.filter((s) => sensorState(s) === 'stale').length;
+  const problems = (localOk ? 0 : 1) + stale;
+  const sensorBadge = !problems ? 'Tutti ok' : localOk ? `${stale} in ritardo` : `${problems} ${plural(problems, 'problema', 'problemi')}`;
+  const localValue = localOk
+    ? o.temperatures.local !== null
+      ? `<span class="mono">${fmt(o.temperatures.local)}°</span>`
+      : 'ok'
+    : `${o.temperatures.local !== null ? `<span class="mono">${fmt(o.temperatures.local)}°</span> · ` : ''}${esc(localStatusLabel(o.temperatures.localStatus))}`;
   const pct = usage.weeklyBudgetUsd > 0 ? Math.min(100, (usage.costUsd / usage.weeklyBudgetUsd) * 100) : 0;
   const update = o.update;
   const w = o.weather;
@@ -1122,9 +1144,9 @@ function renderSystem() {
       </section>
 
       <section class="card tight rise" style="--i:2">
-        <div class="head mb"><span class="title">Sensori</span><span class="badge ${stale ? 'warn' : 'ok'}">${stale ? `${stale} in ritardo` : 'Tutti ok'}</span></div>
+        <div class="head mb"><span class="title">Sensori</span><span class="badge ${problems ? 'warn' : 'ok'}">${sensorBadge}</span></div>
         <div>
-          ${healthRow('heat', o.temperatures.localStatus === 'Ok' ? 'g' : 'a', 'Sensore locale', o.temperatures.local !== null ? `<span class="mono">${fmt(o.temperatures.local)}°</span>` : esc(o.temperatures.localStatus))}
+          ${healthRow('heat', localOk ? 'g' : 'a', 'Sensore locale', localValue)}
           ${sensors
             .map((s) => {
               const st = sensorState(s);
