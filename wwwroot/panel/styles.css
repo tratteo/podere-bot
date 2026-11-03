@@ -1792,6 +1792,124 @@ button {
   color: var(--text);
 }
 
+/* ---------- chart series picker ---------- */
+
+.chart-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.picker {
+  position: relative;
+}
+
+.picker-btn {
+  gap: 8px;
+}
+
+.picker-btn #series-label {
+  max-width: 170px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.picker-btn .pick-arrow {
+  width: 16px;
+  height: 16px;
+  opacity: 0.55;
+  transform: rotate(90deg);
+}
+
+.picker-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 240px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.picker-menu[hidden] {
+  display: none;
+}
+
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 48px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-row:hover,
+.picker-row.on {
+  background: var(--soft);
+  color: var(--text);
+}
+
+.pick-line {
+  flex: none;
+  width: 32px;
+  color: var(--text);
+}
+
+.pick-line svg {
+  display: block;
+  width: 30px;
+  height: 8px;
+}
+
+.pick-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pick-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+  color: var(--text);
+}
+
+.picker-row.on .pick-check {
+  opacity: 1;
+}
+
+@media (max-width: 720px) {
+  .picker-menu {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    top: auto;
+    max-height: 60vh;
+  }
+}
+
 /* ---------- users ---------- */
 
 .users-grid {

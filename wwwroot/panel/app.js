@@ -99,6 +99,8 @@ const state = {
   skew: 0,
   history: null,
   historyRange: 'today',
+  chartSeries: ['avg'],
+  seriesMenuOpen: false,
   customFrom: '',
   customTo: '',
   events: [],
@@ -940,8 +942,8 @@ function renderHeating() {
       ${timeline(h.program.intervals, { labels: true, fine: true })}
     </section>
     <section class="card rise" style="--i:4">
-      <div class="head" style="flex-wrap:wrap"><span class="title">Andamento</span>${seg('chart-range', RANGES, state.historyRange, 'sm')}</div>
-      ${temperatureChart()}
+      <div class="head" style="flex-wrap:wrap"><span class="title">Andamento</span><div class="chart-tools">${seg('chart-range', RANGES, state.historyRange, 'sm')}${seriesPicker()}</div></div>
+      <div id="chart-body">${temperatureChart()}</div>
     </section>
   </div>`;
 }
@@ -1192,17 +1194,118 @@ const VIEW_RENDERERS = {
 
 /* ---------- chart ---------- */
 
+function availableSeries() {
+  return [{ id: 'avg', label: 'Media' }, ...(state.history?.series || []).map((s) => ({ id: s.id, label: s.label }))];
+}
+
+function activeSeriesIds() {
+  const available = new Set(availableSeries().map((s) => s.id));
+  return state.chartSeries.filter((id) => available.has(id));
+}
+
+function seriesLabel(id) {
+  return availableSeries().find((s) => s.id === id)?.label || 'Serie';
+}
+
+function seriesButtonLabel() {
+  const ids = activeSeriesIds();
+  if (!ids.length) return 'Nessuna serie';
+  if (ids.length === 1) return seriesLabel(ids[0]);
+  if (ids.includes('avg')) return `Media + ${ids.length - 1}`;
+  return `${ids.length} sensori`;
+}
+
+/** The average stays solid; each sensor gets a different dash pattern, since the UI is monochrome. */
+function seriesDash(id) {
+  if (id === 'avg') return '';
+  const index = (state.history?.series || []).findIndex((s) => s.id === id);
+  const dashes = ['7 5', '2 4', '10 4 2 4', '14 5', '4 3 1 3'];
+  return dashes[Math.max(0, index) % dashes.length];
+}
+
+function seriesSwatch(id) {
+  const dash = seriesDash(id);
+  return `<span class="pick-line"><svg viewBox="0 0 30 8" aria-hidden="true"><line x1="1" y1="4" x2="29" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg></span>`;
+}
+
+function seriesPicker() {
+  const ids = activeSeriesIds();
+  const rows = availableSeries()
+    .map((s) => {
+      const on = ids.includes(s.id);
+      return `<button type="button" class="picker-row ${on ? 'on' : ''}" data-action="series-item" data-series="${esc(s.id)}" role="checkbox" aria-checked="${on}">${seriesSwatch(s.id)}<span class="pick-label">${esc(s.label)}</span><span class="pick-check">${icon('check')}</span></button>`;
+    })
+    .join('');
+  return `<div class="picker" id="series-picker">
+    <button type="button" class="btn s g picker-btn" id="series-toggle" data-action="series-menu" aria-haspopup="true" aria-expanded="${state.seriesMenuOpen}">${icon('activity')}<span id="series-label">${esc(seriesButtonLabel())}</span>${icon('chevron', 'pick-arrow')}</button>
+    <div class="picker-menu" id="series-menu"${state.seriesMenuOpen ? '' : ' hidden'}>${rows}</div>
+  </div>`;
+}
+
+function toggleSeriesMenu() {
+  const menu = $('series-menu');
+  const button = $('series-toggle');
+  if (!menu || !button) return;
+  state.seriesMenuOpen = !state.seriesMenuOpen;
+  menu.hidden = !state.seriesMenuOpen;
+  button.setAttribute('aria-expanded', String(state.seriesMenuOpen));
+}
+
+function closeSeriesMenu() {
+  const menu = $('series-menu');
+  const button = $('series-toggle');
+  state.seriesMenuOpen = false;
+  if (menu && button && !menu.hidden) {
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function toggleSeries(id) {
+  const index = state.chartSeries.indexOf(id);
+  if (index >= 0) state.chartSeries.splice(index, 1);
+  else state.chartSeries.push(id);
+  updateSeriesUI();
+}
+
+function updateSeriesUI() {
+  const ids = activeSeriesIds();
+  document.querySelectorAll('#series-menu [data-series]').forEach((row) => {
+    const on = ids.includes(row.dataset.series);
+    row.classList.toggle('on', on);
+    row.setAttribute('aria-checked', String(on));
+  });
+  const label = $('series-label');
+  if (label) label.textContent = seriesButtonLabel();
+  const body = $('chart-body');
+  if (body) body.innerHTML = temperatureChart();
+}
+
 function temperatureChart() {
   const data = state.history;
   if (!data) return `<div class="chart-empty"><span class="spinner"></span><span>Carico lo storico…</span></div>`;
   if (data.error) return `<div class="chart-empty">${icon('alert')}<span>${esc(data.error)}</span></div>`;
 
-  const points = (data.points || []).map((p) => ({ at: new Date(p.at), avg: p.avg, min: p.min, max: p.max }));
-  if (points.length < 2) return `<div class="chart-empty">${icon('activity')}<span>Nessun dato per questo periodo.</span></div>`;
+  const avgPoints = (data.points || []).map((p) => ({ at: new Date(p.at), avg: p.avg, min: p.min, max: p.max }));
+  const drawAvg = state.chartSeries.includes('avg') && avgPoints.length > 0;
+  const series = (data.series || []).filter((s) => state.chartSeries.includes(s.id));
+  if (!drawAvg && !series.length) return `<div class="chart-empty">${icon('activity')}<span>Seleziona almeno una serie dal menu.</span></div>`;
 
-  const min = Math.min(...points.map((p) => p.min));
-  const max = Math.max(...points.map((p) => p.max));
-  const avg = points.reduce((sum, p) => sum + p.avg, 0) / points.length;
+  const stamps = [];
+  if (drawAvg) stamps.push(avgPoints[0].at.getTime(), avgPoints[avgPoints.length - 1].at.getTime());
+  for (const s of series) for (const p of s.points) stamps.push(new Date(p.at).getTime());
+  if (!stamps.length) return `<div class="chart-empty">${icon('activity')}<span>Nessun dato per questo periodo.</span></div>`;
+  const t0 = Math.min(...stamps);
+  const t1 = Math.max(...stamps);
+  const span = t1 - t0 || 1;
+
+  const values = [];
+  if (drawAvg) for (const p of avgPoints) values.push(p.min, p.max);
+  for (const s of series) for (const p of s.points) values.push(p.value);
+  if (!values.length) return `<div class="chart-empty">${icon('activity')}<span>Nessun dato per questo periodo.</span></div>`;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
   let yMin = Math.floor((min - 0.5) * 2) / 2;
   let yMax = Math.ceil((max + 0.5) * 2) / 2;
   if (yMax - yMin < 2) {
@@ -1212,18 +1315,33 @@ function temperatureChart() {
 
   const W = 640;
   const H = 160;
-  const t0 = points[0].at.getTime();
-  const span = points[points.length - 1].at.getTime() - t0 || 1;
-  const x = (at) => ((at.getTime() - t0) / span) * W;
+  const x = (ms) => ((ms - t0) / span) * W;
   const y = (v) => H - ((v - yMin) / (yMax - yMin)) * H;
 
-  const upper = points.map((p) => `${x(p.at).toFixed(1)},${y(p.max).toFixed(1)}`);
-  const lower = points
-    .slice()
-    .reverse()
-    .map((p) => `${x(p.at).toFixed(1)},${y(p.min).toFixed(1)}`);
-  const band = `M${upper.join(' L')} L${lower.join(' L')} Z`;
-  const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.at).toFixed(1)},${y(p.avg).toFixed(1)}`).join(' ');
+  const band = drawAvg
+    ? (() => {
+        const upper = avgPoints.map((p) => `${x(p.at.getTime()).toFixed(1)},${y(p.max).toFixed(1)}`);
+        const lower = avgPoints
+          .slice()
+          .reverse()
+          .map((p) => `${x(p.at.getTime()).toFixed(1)},${y(p.min).toFixed(1)}`);
+        return `M${upper.join(' L')} L${lower.join(' L')} Z`;
+      })()
+    : '';
+  const avgLine = drawAvg
+    ? avgPoints.map((p, i) => `${i ? 'L' : 'M'}${x(p.at.getTime()).toFixed(1)},${y(p.avg).toFixed(1)}`).join(' ')
+    : '';
+  const sensorLines = series
+    .map((s) => {
+      const points = s.points.map((p) => ({ x: x(new Date(p.at).getTime()), y: y(p.value) }));
+      if (!points.length) return '';
+      if (points.length === 1)
+        return `<circle cx="${points[0].x.toFixed(1)}" cy="${points[0].y.toFixed(1)}" r="2.2" fill="currentColor" fill-opacity=".8"/>`;
+      const d = points.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      const dash = seriesDash(s.id);
+      return `<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-opacity=".8" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke"/>`;
+    })
+    .join('');
   const grid = [1, 2, 3].map((i) => `<line x1="0" y1="${(H / 4) * i}" x2="${W}" y2="${(H / 4) * i}" stroke="currentColor" stroke-opacity=".07" vector-effect="non-scaling-stroke"/>`).join('');
 
   const yLabels = [0, 1, 2, 3, 4].map((i) => `<span>${(yMax - ((yMax - yMin) / 4) * i).toFixed(1)}°</span>`).join('');
@@ -1234,10 +1352,16 @@ function temperatureChart() {
     xLabels.push(data.bucket === 'day' ? fmtDate(at) : fmtTime(at));
   }
 
-  const last = points[points.length - 1];
+  const last = drawAvg ? avgPoints[avgPoints.length - 1] : null;
+  const avg = drawAvg ? avgPoints.reduce((sum, p) => sum + p.avg, 0) / avgPoints.length : null;
+  const avgMin = drawAvg ? Math.min(...avgPoints.map((p) => p.min)) : null;
+  const avgMax = drawAvg ? Math.max(...avgPoints.map((p) => p.max)) : null;
   const w = weather();
   const outdoor = state.historyRange === 'today' && w && w.min !== null && w.min !== undefined ? `<span>Esterno <b>${fmt(w.min)}–${fmt(w.max)}°</b></span>` : '';
-  const key = `${data.range}|${data.from}|${data.to}|${points.length}|${last.at.getTime()}`;
+  const key = `${data.range}|${data.from}|${data.to}|${avgPoints.length}|${t1}|${state.chartSeries.join(',')}`;
+  const stats = drawAvg
+    ? `<span>Min <b>${fmt(avgMin)}°</b></span><span>Max <b>${fmt(avgMax)}°</b></span><span>Media <b>${fmt(avg)}°</b></span><span>${avgPoints.length} ${data.bucket === 'day' ? 'giorni' : 'ore'}</span>`
+    : `<span>${series.length} serie</span>`;
 
   return `<div data-key="${esc(key)}">
     <div class="chart">
@@ -1245,15 +1369,16 @@ function temperatureChart() {
       <div class="chart-plot">
         <svg class="reveal" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
           ${grid}
-          <path d="${band}" fill="currentColor" fill-opacity=".08"/>
-          <path d="${line}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+          ${band ? `<path d="${band}" fill="currentColor" fill-opacity=".08"/>` : ''}
+          ${sensorLines}
+          ${avgLine ? `<path d="${avgLine}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
         </svg>
-        <span class="chart-dot" style="left:${((x(last.at) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px"></span>
+        ${last ? `<span class="chart-dot" style="left:${((x(last.at.getTime()) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px"></span>` : ''}
       </div>
     </div>
     <div class="chart-x" style="margin-left:50px">${xLabels.map((l) => `<span>${l}</span>`).join('')}</div>
   </div>
-  <div class="chart-summary"><span>Min <b>${fmt(min)}°</b></span><span>Max <b>${fmt(max)}°</b></span><span>Media <b>${fmt(avg)}°</b></span><span>${points.length} ${data.bucket === 'day' ? 'giorni' : 'ore'}</span>${outdoor}</div>`;
+  <div class="chart-summary">${stats}${outdoor}</div>`;
 }
 
 /* ---------- live tick ---------- */
@@ -2097,6 +2222,7 @@ function setView(name) {
   if (!VIEWS[name]) return;
   if (isSheetOpen()) closeSheet();
   const changed = name !== state.view;
+  if (changed) state.seriesMenuOpen = false;
   state.view = name;
   try {
     if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
@@ -2125,6 +2251,8 @@ const ACTIONS = {
   'remove-interval': (b) => b.closest('.editor-row')?.remove(),
   'save-program': () => saveProgram(),
   'chart-range': (b) => changeRange(b.dataset.value),
+  'series-menu': () => toggleSeriesMenu(),
+  'series-item': (b) => toggleSeries(b.dataset.series),
   'apply-range': () => applyRange(),
   filter: (b) => {
     state.eventFilter = b.dataset.value;
@@ -2188,6 +2316,8 @@ const ACTIONS = {
 };
 
 document.addEventListener('click', (event) => {
+  if (!event.target.closest('#series-picker')) closeSeriesMenu();
+
   const nav = event.target.closest('[data-nav]');
   if (nav) {
     setView(nav.dataset.nav);

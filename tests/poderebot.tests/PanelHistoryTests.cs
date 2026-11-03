@@ -104,5 +104,48 @@ public sealed class PanelHistoryTests
         Assert.Equal(new DateTime(2026, 3, 4, 0, 0, 0), first.At);
     }
 
+    [Fact]
+    public void BuildReturnsOneSeriesPerSensorWithTheLocalProbeFirst()
+    {
+        var at = new DateTime(2026, 3, 4, 10, 0, 0, DateTimeKind.Utc);
+        var rows = new[] { new TemperatureBucket(ToUnix(at), 20, 19, 21, 12) };
+        var sensors = new[]
+        {
+            new SensorBucket("aa", "Camera", ToUnix(at), 12, 12, 12, 12),
+            new SensorBucket("local", "Locale", ToUnix(at), 20, 20, 20, 12),
+        };
+        var from = new DateTime(2026, 3, 4, 0, 0, 0);
+        var to = from.AddDays(1);
+
+        var result = TemperatureHistory.Build(rows, sensors, "today", from, to, Utc);
+
+        Assert.Equal(2, result.Series.Count);
+        Assert.Equal("local", result.Series[0].Id);
+        Assert.Equal("Camera", result.Series[1].Label);
+        var camera = Assert.Single(result.Series[1].Points);
+        Assert.Equal(12, camera.Value, 3);
+        Assert.Equal(10, camera.At.Hour);
+    }
+
+    [Fact]
+    public void SensorSeriesAggregateByDayWithSamplesAsWeights()
+    {
+        var day = new DateTime(2026, 3, 4, 0, 0, 0, DateTimeKind.Utc);
+        var sensors = new[]
+        {
+            new SensorBucket("aa", "Camera", ToUnix(day.AddHours(8)), 10, 10, 10, 1),
+            new SensorBucket("aa", "Camera", ToUnix(day.AddHours(9)), 20, 20, 20, 3),
+        };
+        var from = new DateTime(2026, 3, 1, 0, 0, 0);
+        var to = from.AddDays(10);
+
+        var result = TemperatureHistory.Build([], sensors, "30d", from, to, Utc);
+
+        var series = Assert.Single(result.Series);
+        var point = Assert.Single(series.Points);
+        Assert.Equal(17.5, point.Value, 3);
+        Assert.Equal(new DateTime(2026, 3, 4, 0, 0, 0), point.At);
+    }
+
     private static long ToUnix(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeSeconds();
 }

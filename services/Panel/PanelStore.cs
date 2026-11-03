@@ -7,6 +7,14 @@ internal sealed record TemperatureBucket(long HourUtc, double Avg, double Min, d
     public DateTime AtUtc => DateTimeOffset.FromUnixTimeSeconds(HourUtc).UtcDateTime;
 }
 
+/// <summary>One sensor reading folded into the hourly history.</summary>
+internal sealed record SensorSample(string Id, string Label, double Value);
+
+internal sealed record SensorBucket(string Id, string Label, long HourUtc, double Avg, double Min, double Max, int Samples)
+{
+    public DateTime AtUtc => DateTimeOffset.FromUnixTimeSeconds(HourUtc).UtcDateTime;
+}
+
 internal sealed record PanelEvent(long Id, string Topic, string Title, string? Detail, DateTime At);
 
 /// <summary>
@@ -80,6 +88,17 @@ internal sealed class PanelStore
                         max REAL NOT NULL,
                         samples INTEGER NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS sensor_hourly (
+                        hour_utc INTEGER NOT NULL,
+                        sensor_id TEXT NOT NULL,
+                        label TEXT NOT NULL,
+                        avg REAL NOT NULL,
+                        min REAL NOT NULL,
+                        max REAL NOT NULL,
+                        samples INTEGER NOT NULL,
+                        PRIMARY KEY (hour_utc, sensor_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS sensor_hourly_id ON sensor_hourly(sensor_id, hour_utc);
                     CREATE TABLE IF NOT EXISTS events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         topic TEXT NOT NULL,
@@ -148,6 +167,52 @@ internal sealed class PanelStore
         }
     }
 
+    /// <summary>Folds one sample per sensor into the bucket of the UTC hour it belongs to.</summary>
+    public void RecordSensorTemperatures(DateTime timestampUtc, IReadOnlyList<SensorSample> samples)
+    {
+        if (!Available || samples.Count == 0)
+            return;
+
+        var hour = new DateTime(timestampUtc.Year, timestampUtc.Month, timestampUtc.Day, timestampUtc.Hour, 0, 0, DateTimeKind.Utc);
+        var hourUtc = new DateTimeOffset(hour).ToUnixTimeSeconds();
+
+        try
+        {
+            lock (sync)
+            {
+                using var connection = Open();
+                using var transaction = connection.BeginTransaction();
+                using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = """
+                    INSERT INTO sensor_hourly(hour_utc, sensor_id, label, avg, min, max, samples)
+                    VALUES($h, $id, $label, $t, $t, $t, 1)
+                    ON CONFLICT(hour_utc, sensor_id) DO UPDATE SET
+                        label = excluded.label,
+                        avg = (avg * samples + excluded.avg) / (samples + 1),
+                        min = MIN(min, excluded.min),
+                        max = MAX(max, excluded.max),
+                        samples = samples + 1;
+                    """;
+
+                foreach (var sample in samples)
+                {
+                    command.Parameters.Clear();
+                    command.Parameters.AddWithValue("$h", hourUtc);
+                    command.Parameters.AddWithValue("$id", Truncate(sample.Id, 64) ?? "");
+                    command.Parameters.AddWithValue("$label", Truncate(sample.Label, 80) ?? "");
+                    command.Parameters.AddWithValue("$t", sample.Value);
+                    command.ExecuteNonQuery();
+                }
+                transaction.Commit();
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("unable to record sensor samples: {m}", ex.Message);
+        }
+    }
+
     public IReadOnlyList<TemperatureBucket> Hourly(DateTime fromUtc, DateTime toUtc)
     {
         var result = new List<TemperatureBucket>();
@@ -184,6 +249,48 @@ internal sealed class PanelStore
         catch (Exception ex)
         {
             logger.LogWarning("unable to read temperature history: {m}", ex.Message);
+        }
+        return result;
+    }
+
+    public IReadOnlyList<SensorBucket> SensorHourly(DateTime fromUtc, DateTime toUtc)
+    {
+        var result = new List<SensorBucket>();
+        if (!Available)
+            return result;
+
+        try
+        {
+            lock (sync)
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT sensor_id, label, hour_utc, avg, min, max, samples
+                    FROM sensor_hourly
+                    WHERE hour_utc >= $from AND hour_utc < $to
+                    ORDER BY sensor_id, hour_utc;
+                    """;
+                command.Parameters.AddWithValue("$from", new DateTimeOffset(fromUtc.ToUniversalTime()).ToUnixTimeSeconds());
+                command.Parameters.AddWithValue("$to", new DateTimeOffset(toUtc.ToUniversalTime()).ToUnixTimeSeconds());
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                    result.Add(
+                        new SensorBucket(
+                            reader.GetString(0),
+                            reader.GetString(1),
+                            reader.GetInt64(2),
+                            reader.GetDouble(3),
+                            reader.GetDouble(4),
+                            reader.GetDouble(5),
+                            reader.GetInt32(6)
+                        )
+                    );
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("unable to read sensor history: {m}", ex.Message);
         }
         return result;
     }
@@ -268,7 +375,10 @@ internal sealed class PanelStore
 
                 using (var history = connection.CreateCommand())
                 {
-                    history.CommandText = "DELETE FROM temperature_hourly WHERE hour_utc < $cutoff;";
+                    history.CommandText = """
+                    DELETE FROM temperature_hourly WHERE hour_utc < $cutoff;
+                    DELETE FROM sensor_hourly WHERE hour_utc < $cutoff;
+                    """;
                     history.Parameters.AddWithValue(
                         "$cutoff",
                         new DateTimeOffset(DateTime.UtcNow.AddDays(-Math.Max(1, historyRetentionDays))).ToUnixTimeSeconds()

@@ -74,6 +74,35 @@ public sealed class PanelStoreTests : IDisposable
     }
 
     [Fact]
+    public void SensorSamplesFoldPerSensorAndHour()
+    {
+        var at = new DateTime(2026, 3, 4, 10, 5, 0, DateTimeKind.Utc);
+        store.RecordSensorTemperatures(
+            at,
+            [new SensorSample("local", "Locale", 20), new SensorSample("aa", "Camera", 12)]
+        );
+        store.RecordSensorTemperatures(
+            at.AddMinutes(5),
+            [new SensorSample("local", "Locale", 22), new SensorSample("aa", "Camera", 10)]
+        );
+
+        var buckets = store.SensorHourly(
+            new DateTime(2026, 3, 4, 10, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 3, 4, 11, 0, 0, DateTimeKind.Utc)
+        );
+
+        Assert.Equal(2, buckets.Count);
+        var local = buckets.Single(b => b.Id == "local");
+        Assert.Equal(21, local.Avg, 3);
+        Assert.Equal(20, local.Min, 3);
+        Assert.Equal(22, local.Max, 3);
+        Assert.Equal(2, local.Samples);
+        var camera = buckets.Single(b => b.Id == "aa");
+        Assert.Equal(11, camera.Avg, 3);
+        Assert.Equal("Camera", camera.Label);
+    }
+
+    [Fact]
     public void EventsAreListedNewestFirstAndFilteredByTopic()
     {
         store.AddEvent("technical", "Sensore fermo", null, new DateTime(2026, 3, 4, 9, 0, 0, DateTimeKind.Utc));
@@ -93,6 +122,8 @@ public sealed class PanelStoreTests : IDisposable
     {
         store.RecordTemperature(DateTime.UtcNow.AddDays(-500), 20);
         store.RecordTemperature(DateTime.UtcNow, 21);
+        store.RecordSensorTemperatures(DateTime.UtcNow.AddDays(-500), [new SensorSample("local", "Locale", 20)]);
+        store.RecordSensorTemperatures(DateTime.UtcNow, [new SensorSample("local", "Locale", 21)]);
         for (var i = 0; i < 5; i++)
             store.AddEvent("technical", $"Evento {i}", null, DateTime.UtcNow.AddMinutes(-i));
 
@@ -100,6 +131,8 @@ public sealed class PanelStoreTests : IDisposable
 
         var buckets = store.Hourly(DateTime.UtcNow.AddDays(-600), DateTime.UtcNow.AddDays(1));
         Assert.Single(buckets);
+        var sensors = store.SensorHourly(DateTime.UtcNow.AddDays(-600), DateTime.UtcNow.AddDays(1));
+        Assert.Single(sensors);
         Assert.Equal(2, store.Events(10).Count);
     }
 }

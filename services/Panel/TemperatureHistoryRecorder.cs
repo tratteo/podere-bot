@@ -7,12 +7,16 @@ namespace PodereBot.Services.Panel;
 internal sealed class TemperatureHistoryRecorder(
     IConfiguration configuration,
     HeatingDriver heatingDriver,
+    ITemperatureDriver temperatureReader,
     PanelStore store,
     NotificationLog log,
     ILogger<TemperatureHistoryRecorder> logger
 ) : BackgroundService
 {
     private readonly PanelHistoryOptions options = OptionsReader.ReadPanelHistory(configuration);
+    private readonly TimeSpan sensorTolerance = TimeSpan.FromSeconds(
+        Math.Max(10, configuration.GetValue<int?>("Heating:TempSensorsToleranceSeconds") ?? 60)
+    );
     private DateTime nextPruneUtc = DateTime.UtcNow.AddDays(1);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -27,9 +31,22 @@ internal sealed class TemperatureHistoryRecorder(
                 if (DateTime.UtcNow >= nextPruneUtc)
                     Prune();
 
+                var now = DateTime.UtcNow;
                 var temperature = await heatingDriver.GetOperationalTemperature(stoppingToken);
                 if (temperature != null)
-                    store.RecordTemperature(DateTime.UtcNow, temperature.Value);
+                    store.RecordTemperature(now, temperature.Value);
+
+                var samples = new List<SensorSample>();
+                var probe = await temperatureReader.ProbeLocalTemperature(stoppingToken);
+                if (probe.Status == LocalTemperatureStatus.Ok && probe.Temperature is float local)
+                    samples.Add(new SensorSample("local", "Locale", local));
+                foreach (var reading in temperatureReader.GetExternalTemperatureReadings())
+                {
+                    if (now - reading.Timestamp.ToUniversalTime() > sensorTolerance)
+                        continue;
+                    samples.Add(new SensorSample(reading.Id, reading.Location, reading.Temperature));
+                }
+                store.RecordSensorTemperatures(now, samples);
             }
             catch (Exception ex)
             {

@@ -188,7 +188,14 @@ internal class PanelApi : IEndpoint
         {
             var (start, end) = TemperatureHistory.Resolve(range, ParseLocal(from), ParseLocal(to), DateTime.Now);
             var rows = store.Hourly(start.ToUniversalTime(), end.ToUniversalTime().AddSeconds(1));
-            var result = TemperatureHistory.Build(rows, string.IsNullOrWhiteSpace(range) ? "today" : range!, start, end);
+            var sensors = store.SensorHourly(start.ToUniversalTime(), end.ToUniversalTime().AddSeconds(1));
+            var result = TemperatureHistory.Build(
+                rows,
+                sensors,
+                string.IsNullOrWhiteSpace(range) ? "today" : range!,
+                start,
+                end
+            );
             return Results.Ok(result);
         }
         catch (PanelValidationException ex)
