@@ -1190,9 +1190,9 @@ function renderSystem() {
         <div class="head"><span class="title">Aggiornamento</span><span class="badge ${update.result === 'failed' || update.result === 'rolled-back' ? 'bad' : update.result ? 'ok' : ''}">${esc(!update.result ? 'mai eseguito' : update.result === 'failed' || update.result === 'rolled-back' ? update.result : 'aggiornato')}</span></div>
         <div>
           <div class="kv"><span>Canale</span><b>release</b></div>
-          <div class="kv"><span>Versione</span><b class="mono">${esc(String(update.toSha || o.system.version).slice(0, 12))}</b></div>
-          <div class="kv"><span>Aggiornato</span><b>${update.builtAtUtc || update.lastRunUtc ? `${fmtDate(update.builtAtUtc || update.lastRunUtc)} · ${fmtTime(update.builtAtUtc || update.lastRunUtc)}` : '—'}</b></div>
-          <div class="kv"><span>Ultimo controllo</span><b>${update.lastRunUtc ? relative(update.lastRunUtc) : '—'}</b></div>
+          <div class="kv"><span>Versione</span><b class="mono">${esc(o.system.version === 'locale' ? 'build locale' : String(o.system.version || 'non disponibile'))}</b></div>
+          <div class="kv"><span>Aggiornato</span><b>${update.builtAtUtc ? `${fmtDate(update.builtAtUtc)} · ${fmtTime(update.builtAtUtc)}` : '—'}</b></div>
+          <div class="kv"><span>Ultima verifica</span><b>${update.lastRunUtc ? `${fmtDate(update.lastRunUtc)} · ${fmtTime(update.lastRunUtc)}` : '—'}</b></div>
           ${update.reason && !/^already at/i.test(update.reason) ? `<div class="kv"><span>Dettaglio</span><b>${esc(update.reason)}</b></div>` : ''}
         </div>
         <button class="btn g" data-action="refresh">${icon('refresh')}Aggiorna dati</button>

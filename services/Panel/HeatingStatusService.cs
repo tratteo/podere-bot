@@ -89,7 +89,7 @@ internal sealed class UpdateStateStore(IHostEnvironment environment, ILogger<Upd
 
     public PanelUpdateDto Read()
     {
-        var state = ReadFile<UpdateStateFile>(statePath, "update state");
+        var state = ReadState();
         var build = ReadBuild();
         return new PanelUpdateDto(
             state?.Result,
@@ -105,10 +105,18 @@ internal sealed class UpdateStateStore(IHostEnvironment environment, ILogger<Upd
     {
         get
         {
-            var state = Read();
-            return state.ToSha ?? "locale";
+            // version.json is the build actually running. update-state.json is only a fallback
+            // when the last run was a successful update or a no-op at the current commit.
+            var build = ReadBuild();
+            if (build?.Sha is { Length: > 0 } sha)
+                return Short(sha) ?? "locale";
+
+            var state = ReadState();
+            return state?.Result is "updated" or "noop" ? Short(state.ToSha) ?? "locale" : "locale";
         }
     }
+
+    private UpdateStateFile? ReadState() => ReadFile<UpdateStateFile>(statePath, "update state");
 
     private BuildInfoFile? ReadBuild()
     {
