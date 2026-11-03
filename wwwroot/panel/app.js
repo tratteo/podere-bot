@@ -1136,6 +1136,17 @@ function renderSystem() {
   const update = o.update;
   const w = o.weather;
   const cpu = health.cpuTemperatureCelsius;
+  const updFailed = update.result === 'failed' || update.result === 'rolled-back';
+  const updTone = updFailed ? 'bad' : update.result === 'available' ? 'warn' : update.result ? 'ok' : '';
+  const updLabel = !update.result
+    ? 'mai eseguito'
+    : updFailed
+      ? update.result
+      : update.result === 'available'
+        ? 'disponibile'
+        : update.result === 'skipped'
+          ? 'saltato'
+          : 'aggiornato';
 
   return `<div class="stack">
     <section class="card rise" style="--i:0;gap:4px">
@@ -1187,7 +1198,7 @@ function renderSystem() {
       </section>
 
       <section class="card rise" style="--i:4;gap:16px">
-        <div class="head"><span class="title">Aggiornamento</span><span class="badge ${update.result === 'failed' || update.result === 'rolled-back' ? 'bad' : update.result ? 'ok' : ''}">${esc(!update.result ? 'mai eseguito' : update.result === 'failed' || update.result === 'rolled-back' ? update.result : 'aggiornato')}</span></div>
+        <div class="head"><span class="title">Aggiornamento</span><span class="badge ${updTone}">${esc(updLabel)}</span></div>
         <div>
           <div class="kv"><span>Canale</span><b>release</b></div>
           <div class="kv"><span>Versione</span><b class="mono">${esc(o.system.version === 'locale' ? 'build locale' : String(o.system.version || 'non disponibile'))}</b></div>
@@ -1309,26 +1320,87 @@ function updateSeriesUI() {
   }
 }
 
-/** Catmull-Rom style smoothing: keeps the points, rounds the corners between them. */
-function smoothPath(points) {
-  if (points.length < 2) return '';
-  if (points.length === 2)
-    return `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)} L${points[1].x.toFixed(1)},${points[1].y.toFixed(1)}`;
+/** Monotone cubic interpolation: passes through every point without overshooting. */
+function monotoneModel(points) {
+  const pts = points.filter((p, i, all) => i === 0 || p.x > all[i - 1].x);
+  const n = pts.length;
+  if (n < 2) return null;
 
-  const tension = 0.16;
-  let d = `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const p0 = points[i - 1] || points[i];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[i + 2] || p2;
-    const c1x = p1.x + (p2.x - p0.x) * tension;
-    const c1y = p1.y + (p2.y - p0.y) * tension;
-    const c2x = p2.x - (p3.x - p1.x) * tension;
-    const c2y = p2.y - (p3.y - p1.y) * tension;
-    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  const dx = [];
+  const delta = [];
+  for (let i = 0; i < n - 1; i += 1) {
+    const h = pts[i + 1].x - pts[i].x;
+    dx.push(h);
+    delta.push((pts[i + 1].y - pts[i].y) / h);
+  }
+
+  const m = new Array(n);
+  m[0] = delta[0];
+  m[n - 1] = delta[n - 2];
+  for (let i = 1; i < n - 1; i += 1) {
+    if (delta[i - 1] * delta[i] <= 0) {
+      m[i] = 0;
+    } else {
+      const w1 = 2 * dx[i] + dx[i - 1];
+      const w2 = dx[i] + 2 * dx[i - 1];
+      m[i] = (w1 + w2) / (w1 / delta[i - 1] + w2 / delta[i]);
+    }
+  }
+
+  for (let i = 0; i < n - 1; i += 1) {
+    if (delta[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / delta[i];
+    const b = m[i + 1] / delta[i];
+    const s = a * a + b * b;
+    if (s > 9) {
+      const t = 3 / Math.sqrt(s);
+      m[i] = t * a * delta[i];
+      m[i + 1] = t * b * delta[i];
+    }
+  }
+  return { pts, dx, m };
+}
+
+function monotonePath(points) {
+  const model = monotoneModel(points);
+  if (!model) return '';
+  const { pts, dx, m } = model;
+  let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i += 1) {
+    const c1x = pts[i].x + dx[i] / 3;
+    const c1y = pts[i].y + (m[i] * dx[i]) / 3;
+    const c2x = pts[i + 1].x - dx[i] / 3;
+    const c2y = pts[i + 1].y - (m[i + 1] * dx[i]) / 3;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${pts[i + 1].x.toFixed(1)},${pts[i + 1].y.toFixed(1)}`;
   }
   return d;
+}
+
+function monotoneSamples(points, perSegment = 8) {
+  const model = monotoneModel(points);
+  if (!model) return points;
+  const { pts, dx, m } = model;
+  const out = [{ x: pts[0].x, y: pts[0].y }];
+  for (let i = 0; i < pts.length - 1; i += 1) {
+    for (let s = 1; s <= perSegment; s += 1) {
+      const t = s / perSegment;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1;
+      const h10 = t3 - 2 * t2 + t;
+      const h01 = -2 * t3 + 3 * t2;
+      const h11 = t3 - t2;
+      out.push({
+        x: pts[i].x + dx[i] * t,
+        y: h00 * pts[i].y + h10 * dx[i] * m[i] + h01 * pts[i + 1].y + h11 * dx[i] * m[i + 1],
+      });
+    }
+  }
+  return out;
 }
 
 let chartHover = null;
@@ -1375,9 +1447,9 @@ function showChartHoverAt(plot, clientX) {
     if (Math.abs(point.ms - targetMs) < Math.abs(nearest.ms - targetMs)) nearest = point;
   }
 
-  const left = ((nearest.ms - chartHover.t0) / chartHover.span) * rect.width;
+  const lineLeft = ratio * rect.width;
   cursor.hidden = false;
-  cursor.style.left = `${left}px`;
+  cursor.style.left = `${lineLeft}px`;
 
   const rows = chartHover.series
     .map((series) => {
@@ -1394,8 +1466,8 @@ function showChartHoverAt(plot, clientX) {
   tip.innerHTML = `<span class="tip-time">${esc(time)}</span>${rows}`;
   tip.hidden = false;
   const tipWidth = tip.offsetWidth;
-  let tipLeft = left + 14;
-  if (tipLeft + tipWidth > rect.width) tipLeft = left - tipWidth - 14;
+  let tipLeft = lineLeft + 14;
+  if (tipLeft + tipWidth > rect.width) tipLeft = lineLeft - tipWidth - 14;
   tip.style.left = `${Math.max(4, tipLeft)}px`;
   tip.style.top = '8px';
 }
@@ -1434,19 +1506,22 @@ function temperatureChart() {
   }
 
   const W = 640;
-  const H = 160;
+  const H = 200;
   const x = (ms) => ((ms - t0) / span) * W;
   const y = (v) => H - ((v - yMin) / (yMax - yMin)) * H;
 
   const asPoints = (list, value) => list.map((p) => ({ x: x(new Date(p.at).getTime()), y: y(value(p)) }));
   const band = drawAvg
     ? (() => {
-        const upper = smoothPath(asPoints(avgPoints, (p) => p.max));
-        const lower = smoothPath(asPoints([...avgPoints].reverse(), (p) => p.min));
-        return `${upper} ${lower ? lower.replace(/^M/, 'L') : ''} Z`;
+        const upper = monotoneSamples(asPoints(avgPoints, (p) => p.max));
+        const lower = monotoneSamples(asPoints(avgPoints, (p) => p.min)).slice().reverse();
+        if (upper.length < 2 || lower.length < 2) return '';
+        const upperPath = upper.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+        const lowerPath = lower.map((p) => `L${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+        return `${upperPath} ${lowerPath} Z`;
       })()
     : '';
-  const avgLine = drawAvg ? smoothPath(asPoints(avgPoints, (p) => p.avg)) : '';
+  const avgLine = drawAvg ? monotonePath(asPoints(avgPoints, (p) => p.avg)) : '';
   const sensorLines = series
     .map((s) => {
       const points = asPoints(s.points, (p) => p.value);
@@ -1455,7 +1530,27 @@ function temperatureChart() {
       if (points.length === 1)
         return `<circle cx="${points[0].x.toFixed(1)}" cy="${points[0].y.toFixed(1)}" r="2.2" fill="currentColor" style="color:${color}"/>`;
       const dash = seriesDash(s.id);
-      return `<path d="${smoothPath(points)}" fill="none" stroke="currentColor" style="color:${color}" stroke-width="1.8" stroke-opacity=".95" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke"/>`;
+      return `<path d="${monotonePath(points)}" fill="none" stroke="currentColor" style="color:${color}" stroke-width="1.8" stroke-opacity=".95" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke"/>`;
+    })
+    .join('');
+  const avgDots = drawAvg
+    ? avgPoints
+        .map(
+          (p) =>
+            `<circle cx="${x(p.at.getTime()).toFixed(1)}" cy="${y(p.avg).toFixed(1)}" r="2.1" fill="currentColor" style="color:var(--series-avg)" fill-opacity=".85"/>`
+        )
+        .join('')
+    : '';
+  const sensorDots = series
+    .map((s) => {
+      if (s.points.length === 1) return '';
+      const color = seriesColor(s.id);
+      return s.points
+        .map((p) => {
+          const at = new Date(p.at);
+          return `<circle cx="${x(at.getTime()).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="1.9" fill="currentColor" style="color:${color}" fill-opacity=".8"/>`;
+        })
+        .join('');
     })
     .join('');
   const grid = [1, 2, 3].map((i) => `<line x1="0" y1="${(H / 4) * i}" x2="${W}" y2="${(H / 4) * i}" stroke="currentColor" stroke-opacity=".07" vector-effect="non-scaling-stroke"/>`).join('');
@@ -1510,6 +1605,7 @@ function temperatureChart() {
           ${band ? `<path d="${band}" fill="currentColor" style="color:var(--series-avg)" fill-opacity=".08"/>` : ''}
           ${sensorLines}
           ${avgLine ? `<path d="${avgLine}" fill="none" stroke="currentColor" style="color:var(--series-avg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
+          ${avgDots}${sensorDots}
         </svg>
         ${last ? `<span class="chart-dot" style="left:${((x(last.at.getTime()) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px;background:var(--series-avg)"></span>` : ''}
         <span class="chart-cursor" hidden></span>

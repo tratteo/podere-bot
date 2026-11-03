@@ -1725,7 +1725,7 @@ button {
   grid-template-columns: 40px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  min-height: 160px;
+  min-height: 200px;
   color: var(--text);
 }
 
@@ -1734,7 +1734,7 @@ button {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 176px;
+  height: 216px;
   margin-top: -8px;
   line-height: 16px;
   font-variant-numeric: tabular-nums;
@@ -1751,7 +1751,7 @@ button {
 .chart-plot svg {
   display: block;
   width: 100%;
-  height: 160px;
+  height: 200px;
   overflow: visible;
 }
 
@@ -1801,6 +1801,8 @@ button {
   background: currentColor;
   opacity: 0.28;
   pointer-events: none;
+  transition: left 0.09s linear;
+  will-change: left;
 }
 
 .chart-tip {
@@ -1815,6 +1817,7 @@ button {
   background: var(--card);
   box-shadow: var(--shadow);
   pointer-events: none;
+  transition: left 0.09s ease;
   font-size: 13px;
   color: var(--text);
 }
