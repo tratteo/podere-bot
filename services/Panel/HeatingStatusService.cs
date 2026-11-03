@@ -76,29 +76,29 @@ internal sealed record HeatingState(
 /// <summary>Reads the updater state file so the panel can show the running version and the last run.</summary>
 internal sealed class UpdateStateStore(IHostEnvironment environment, ILogger<UpdateStateStore> logger)
 {
-    private readonly string path = Path.Join(environment.ContentRootPath, "update-state.json");
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    private readonly string statePath = Path.Join(environment.ContentRootPath, "update-state.json");
+
+    // The updater writes this next to the publish output; a local demo can keep it in the content root.
+    private readonly string[] buildPaths =
+    [
+        Path.Join(AppContext.BaseDirectory, "version.json"),
+        Path.Join(environment.ContentRootPath, "version.json"),
+    ];
 
     public PanelUpdateDto Read()
     {
-        try
-        {
-            if (!File.Exists(path))
-                return new PanelUpdateDto(null, null, null, null, null);
-
-            var state = JsonSerializer.Deserialize<UpdateStateFile>(File.ReadAllText(path));
-            return new PanelUpdateDto(
-                state?.Result,
-                Short(state?.FromSha),
-                Short(state?.ToSha),
-                ParseUtc(state?.LastRunUtc),
-                state?.Reason
-            );
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug("unable to read the update state: {m}", ex.Message);
-            return new PanelUpdateDto(null, null, null, null, null);
-        }
+        var state = ReadFile<UpdateStateFile>(statePath, "update state");
+        var build = ReadBuild();
+        return new PanelUpdateDto(
+            state?.Result,
+            Short(state?.FromSha),
+            Short(build?.Sha ?? state?.ToSha),
+            ParseUtc(state?.LastRunUtc),
+            state?.Reason,
+            ParseUtc(build?.BuiltAtUtc)
+        );
     }
 
     public string Version
@@ -107,6 +107,33 @@ internal sealed class UpdateStateStore(IHostEnvironment environment, ILogger<Upd
         {
             var state = Read();
             return state.ToSha ?? "locale";
+        }
+    }
+
+    private BuildInfoFile? ReadBuild()
+    {
+        foreach (var path in buildPaths)
+        {
+            var build = ReadFile<BuildInfoFile>(path, "build info");
+            if (build != null)
+                return build;
+        }
+        return null;
+    }
+
+    private T? ReadFile<T>(string path, string label)
+        where T : class
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return null;
+            return JsonSerializer.Deserialize<T>(File.ReadAllText(path), JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug("unable to read the {l}: {m}", label, ex.Message);
+            return null;
         }
     }
 
@@ -125,5 +152,12 @@ internal sealed class UpdateStateStore(IHostEnvironment environment, ILogger<Upd
         public string? ToSha { get; set; }
         public string? FailedSha { get; set; }
         public string? Reason { get; set; }
+    }
+
+    private sealed class BuildInfoFile
+    {
+        public string? Sha { get; set; }
+        public string? BuiltAtUtc { get; set; }
+        public string? Source { get; set; }
     }
 }

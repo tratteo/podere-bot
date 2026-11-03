@@ -1169,12 +1169,13 @@ function renderSystem() {
       </section>
 
       <section class="card rise" style="--i:4;gap:16px">
-        <div class="head"><span class="title">Aggiornamento</span><span class="badge ${update.result === 'updated' ? 'ok' : update.result === 'failed' || update.result === 'rolled-back' ? 'bad' : ''}">${esc(update.result || 'mai eseguito')}</span></div>
+        <div class="head"><span class="title">Aggiornamento</span><span class="badge ${update.result === 'failed' || update.result === 'rolled-back' ? 'bad' : update.result ? 'ok' : ''}">${esc(!update.result ? 'mai eseguito' : update.result === 'failed' || update.result === 'rolled-back' ? update.result : 'aggiornato')}</span></div>
         <div>
           <div class="kv"><span>Canale</span><b>release</b></div>
-          <div class="kv"><span>Ultimo controllo</span><b>${update.lastRunUtc ? relative(update.lastRunUtc) : '—'}</b></div>
           <div class="kv"><span>Versione</span><b class="mono">${esc(String(update.toSha || o.system.version).slice(0, 12))}</b></div>
-          ${update.reason ? `<div class="kv"><span>Dettaglio</span><b>${esc(update.reason)}</b></div>` : ''}
+          <div class="kv"><span>Aggiornato</span><b>${update.builtAtUtc || update.lastRunUtc ? `${fmtDate(update.builtAtUtc || update.lastRunUtc)} · ${fmtTime(update.builtAtUtc || update.lastRunUtc)}` : '—'}</b></div>
+          <div class="kv"><span>Ultimo controllo</span><b>${update.lastRunUtc ? relative(update.lastRunUtc) : '—'}</b></div>
+          ${update.reason && !/^already at/i.test(update.reason) ? `<div class="kv"><span>Dettaglio</span><b>${esc(update.reason)}</b></div>` : ''}
         </div>
         <button class="btn g" data-action="refresh">${icon('refresh')}Aggiorna dati</button>
       </section>
@@ -1223,9 +1224,15 @@ function seriesDash(id) {
   return dashes[Math.max(0, index) % dashes.length];
 }
 
+function seriesColor(id) {
+  if (id === 'avg') return 'currentColor';
+  const index = (state.history?.series || []).findIndex((s) => s.id === id);
+  return `var(--series-${(Math.max(0, index) % 6) + 1})`;
+}
+
 function seriesSwatch(id) {
   const dash = seriesDash(id);
-  return `<span class="pick-line"><svg viewBox="0 0 30 8" aria-hidden="true"><line x1="1" y1="4" x2="29" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg></span>`;
+  return `<span class="pick-line" style="color:${seriesColor(id)}"><svg viewBox="0 0 30 8" aria-hidden="true"><line x1="1" y1="4" x2="29" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg></span>`;
 }
 
 function seriesPicker() {
@@ -1281,6 +1288,28 @@ function updateSeriesUI() {
   if (body) body.innerHTML = temperatureChart();
 }
 
+/** Catmull-Rom style smoothing: keeps the points, rounds the corners between them. */
+function smoothPath(points) {
+  if (points.length < 2) return '';
+  if (points.length === 2)
+    return `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)} L${points[1].x.toFixed(1)},${points[1].y.toFixed(1)}`;
+
+  const tension = 0.16;
+  let d = `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) * tension;
+    const c1y = p1.y + (p2.y - p0.y) * tension;
+    const c2x = p2.x - (p3.x - p1.x) * tension;
+    const c2y = p2.y - (p3.y - p1.y) * tension;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
 function temperatureChart() {
   const data = state.history;
   if (!data) return `<div class="chart-empty"><span class="spinner"></span><span>Carico lo storico…</span></div>`;
@@ -1318,28 +1347,24 @@ function temperatureChart() {
   const x = (ms) => ((ms - t0) / span) * W;
   const y = (v) => H - ((v - yMin) / (yMax - yMin)) * H;
 
+  const asPoints = (list, value) => list.map((p) => ({ x: x(new Date(p.at).getTime()), y: y(value(p)) }));
   const band = drawAvg
     ? (() => {
-        const upper = avgPoints.map((p) => `${x(p.at.getTime()).toFixed(1)},${y(p.max).toFixed(1)}`);
-        const lower = avgPoints
-          .slice()
-          .reverse()
-          .map((p) => `${x(p.at.getTime()).toFixed(1)},${y(p.min).toFixed(1)}`);
-        return `M${upper.join(' L')} L${lower.join(' L')} Z`;
+        const upper = smoothPath(asPoints(avgPoints, (p) => p.max));
+        const lower = smoothPath(asPoints([...avgPoints].reverse(), (p) => p.min));
+        return `${upper} ${lower ? lower.replace(/^M/, 'L') : ''} Z`;
       })()
     : '';
-  const avgLine = drawAvg
-    ? avgPoints.map((p, i) => `${i ? 'L' : 'M'}${x(p.at.getTime()).toFixed(1)},${y(p.avg).toFixed(1)}`).join(' ')
-    : '';
+  const avgLine = drawAvg ? smoothPath(asPoints(avgPoints, (p) => p.avg)) : '';
   const sensorLines = series
     .map((s) => {
-      const points = s.points.map((p) => ({ x: x(new Date(p.at).getTime()), y: y(p.value) }));
+      const points = asPoints(s.points, (p) => p.value);
       if (!points.length) return '';
+      const color = seriesColor(s.id);
       if (points.length === 1)
-        return `<circle cx="${points[0].x.toFixed(1)}" cy="${points[0].y.toFixed(1)}" r="2.2" fill="currentColor" fill-opacity=".8"/>`;
-      const d = points.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+        return `<circle cx="${points[0].x.toFixed(1)}" cy="${points[0].y.toFixed(1)}" r="2.2" fill="currentColor" style="color:${color}"/>`;
       const dash = seriesDash(s.id);
-      return `<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-opacity=".8" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke"/>`;
+      return `<path d="${smoothPath(points)}" fill="none" stroke="currentColor" style="color:${color}" stroke-width="1.8" stroke-opacity=".95" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke"/>`;
     })
     .join('');
   const grid = [1, 2, 3].map((i) => `<line x1="0" y1="${(H / 4) * i}" x2="${W}" y2="${(H / 4) * i}" stroke="currentColor" stroke-opacity=".07" vector-effect="non-scaling-stroke"/>`).join('');

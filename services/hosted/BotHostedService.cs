@@ -39,6 +39,7 @@ internal class BotHostedService : IHostedService
     private readonly SemaphoreSlim initializationLock = new(1, 1);
     private Timer? heartbeat;
     private DateTime? lastTelegramContactUtc;
+    private DateTime? telegramDownSinceUtc;
     private volatile bool initialized;
     private volatile bool summarySent;
 
@@ -122,11 +123,13 @@ internal class BotHostedService : IHostedService
             }
 
             lastTelegramContactUtc = DateTime.UtcNow;
+            telegramDownSinceUtc = null;
             initialized = true;
             logger.LogInformation("@{u} is running", me.Username);
         }
         catch (Exception ex)
         {
+            telegramDownSinceUtc ??= DateTime.UtcNow;
             logger.LogWarning("telegram is not reachable yet, retrying: {m}", ex.Message);
         }
         finally
@@ -353,16 +356,39 @@ internal class BotHostedService : IHostedService
         try
         {
             await Client.GetMe();
+            var wasDown = ShouldAnnounceRecovery(telegramDownSinceUtc, DateTime.UtcNow, heartbeatTimeout);
+            telegramDownSinceUtc = null;
             lastTelegramContactUtc = DateTime.UtcNow;
 
             if (!initialized)
                 await TryInitializeAsync(CancellationToken.None);
+            else if (wasDown)
+                await SendRecoverySummaryAsync();
             else
                 await TrySendStartupSummaryAsync(CancellationToken.None);
         }
         catch (Exception ex)
         {
+            telegramDownSinceUtc ??= DateTime.UtcNow;
             logger.LogWarning("telegram heartbeat failed: {m}", ex.Message);
+        }
+    }
+
+    /// <summary>Only a real outage should re-announce the bot; a short blip must stay quiet.</summary>
+    internal static bool ShouldAnnounceRecovery(DateTime? downSinceUtc, DateTime nowUtc, TimeSpan timeout) =>
+        downSinceUtc is DateTime since && nowUtc - since >= timeout;
+
+    /// <summary>After a real outage, send the boot summary again so the chat knows the bot is back.</summary>
+    private async Task SendRecoverySummaryAsync()
+    {
+        try
+        {
+            logger.LogInformation("telegram is back, sending the summary");
+            await SendStartupSummaryAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("unable to send the recovery summary: {m}", ex.Message);
         }
     }
 

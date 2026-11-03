@@ -20,6 +20,9 @@ panel-pair.sh
 update-state.json
 .install-state
 .update.lock
+panel.pfx
+panel.crt
+panel.key
 build.next/
 build.old/
 build.failed.*/

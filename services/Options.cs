@@ -27,12 +27,13 @@ internal sealed record PanelOptions(
     string? LanHost,
     bool AllowLan,
     int PairingMinutes,
-    int SessionDays
+    int SessionDays,
+    bool Https
 )
 {
     public const int KioskPort = 5051;
 
-    public static readonly PanelOptions Default = new(5052, null, true, 10, 30);
+    public static readonly PanelOptions Default = new(5052, null, true, 10, 30, false);
 }
 
 internal sealed record PanelHistoryOptions(int SampleMinutes, int RetentionDays)
@@ -122,7 +123,8 @@ internal static class OptionsReader
             string.IsNullOrWhiteSpace(section.GetValue<string>("LanHost")) ? null : section.GetValue<string>("LanHost")!.Trim(),
             section.GetValue<bool?>("AllowLan") ?? PanelOptions.Default.AllowLan,
             Math.Max(1, section.GetValue<int?>("PairingMinutes") ?? PanelOptions.Default.PairingMinutes),
-            Math.Max(1, section.GetValue<int?>("SessionDays") ?? PanelOptions.Default.SessionDays)
+            Math.Max(1, section.GetValue<int?>("SessionDays") ?? PanelOptions.Default.SessionDays),
+            section.GetValue<bool?>("Https") ?? PanelOptions.Default.Https
         );
     }
 

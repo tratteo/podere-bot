@@ -82,7 +82,14 @@ internal sealed record PanelUsageDto(double CostUsd, double WeeklyBudgetUsd, lon
 
 internal sealed record PanelEventDto(long Id, string Topic, string Title, string? Detail, DateTime At);
 
-internal sealed record PanelUpdateDto(string? Result, string? FromSha, string? ToSha, DateTime? LastRunUtc, string? Reason);
+internal sealed record PanelUpdateDto(
+    string? Result,
+    string? FromSha,
+    string? ToSha,
+    DateTime? LastRunUtc,
+    string? Reason,
+    DateTime? BuiltAtUtc
+);
 
 internal sealed record PanelWeatherDto(
     double Temperature,

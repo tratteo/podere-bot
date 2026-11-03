@@ -377,6 +377,10 @@ if ! ( exec 9>&-; dotnet publish "$ROOT/PodereBot.csproj" -c Release -r linux-ar
     finish "failed" "$local_sha" "$remote_sha" "release build failed" "" 1
 fi
 
+# The panel reads this from the publish folder: the exact commit that was built and when.
+printf '{\n  "sha": "%s",\n  "builtAtUtc": "%s",\n  "source": "github"\n}\n' \
+    "$remote_sha" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ROOT/build.next/version.json"
+
 log "stopping the watchdog timer for the swap"
 sysctl_ stop poderebot-wd.timer || true
 

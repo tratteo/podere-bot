@@ -45,6 +45,12 @@
   --blue-soft: rgba(139, 163, 199, 0.13);
   --red: #e88a80;
   --red-soft: rgba(232, 138, 128, 0.13);
+  --series-1: #6fb3a0;
+  --series-2: #d8a657;
+  --series-3: #8ba3c7;
+  --series-4: #b48ac9;
+  --series-5: #d98d8d;
+  --series-6: #a3b86c;
   --overlay: rgba(5, 6, 6, 0.72);
   --dialog: #171a18;
   --shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
@@ -79,6 +85,12 @@
   --blue-soft: rgba(74, 104, 148, 0.11);
   --red: #c0463a;
   --red-soft: rgba(192, 70, 58, 0.1);
+  --series-1: #2f7f6f;
+  --series-2: #a8731f;
+  --series-3: #3d6ca3;
+  --series-4: #7a5797;
+  --series-5: #a05252;
+  --series-6: #667a2e;
   --overlay: rgba(20, 20, 18, 0.32);
   --dialog: #ffffff;
   --shadow: 0 30px 80px rgba(0, 0, 0, 0.18);
@@ -1782,6 +1794,7 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 12px 36px;
+  padding-top: 16px;
   font-size: 16px;
   color: var(--muted);
 }
