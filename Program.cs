@@ -303,6 +303,18 @@ app.MapGet(
         )
 );
 
+// The panel lives under /panel; the bare address on a panel port lands there instead of a 404.
+app.MapGet(
+    "/",
+    (HttpContext context) =>
+    {
+        var port = context.Connection.LocalPort;
+        return port == PanelOptions.KioskPort || port == panelOptions.LanPort
+            ? Results.Redirect("/panel/")
+            : Results.NotFound();
+    }
+);
+
 // The kiosk needs the machine token to call the panel API; a LAN device never receives it.
 app.MapGet(
     "/panel/config.js",
