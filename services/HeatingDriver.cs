@@ -21,7 +21,7 @@ internal class HeatingDriver(
     public async Task<float?> GetOperationalTemperature(CancellationToken? cancellationToken = null)
     {
         var readings = temperatureReader.GetExternalTemperatureReadings(readingsTimespan);
-        var operationalReadings = readings.Where(r => !r.Informational).ToList();
+        var operationalReadings = readings.Where(r => !r.Informational && !r.HasError).ToList();
         var temperatures = operationalReadings.ConvertAll(r => r.Temperature);
         var localTemperature = await temperatureReader.GetLocalTemperature(cancellationToken);
         if (localTemperature != null)

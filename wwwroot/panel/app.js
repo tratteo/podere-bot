@@ -429,6 +429,7 @@ function boilerOn() {
 }
 
 function sensorState(sensor) {
+  if (sensor.status) return 'error';
   if (sensor.informational) return 'info';
   return sensor.fresh ? 'ok' : 'stale';
 }
@@ -879,10 +880,19 @@ function seg(action, options, current, cls = '', extra = '') {
 
 /* ---------- views ---------- */
 
+function sourceCount() {
+  const t = temperatures();
+  if (!t) return 0;
+  const local = t.localStatus === 'Ok' && t.local !== null ? 1 : 0;
+  const external = (t.sensors || []).filter((s) => s.fresh && !s.informational && !s.status).length;
+  return local + external;
+}
+
 function hero(kind) {
   const h = heating();
+  const sources = sourceCount();
   return `<section class="hero">
-    <div class="k rise" style="--i:0">Temperatura in casa</div>
+    <div class="k rise" style="--i:0">Temperatura in casa${sources ? `<span class="badge srcbadge">${plural(sources, 'sorgente', 'sorgenti')}</span>` : ''}</div>
     ${temperatureNumber()}
     <div class="hero-line rise" style="--i:1">${kind === 'home' ? boilerLine() : heatingModeLine()}</div>
     <div class="minis rise" style="--i:2">${miniTarget()}${miniOutdoor()}</div>
@@ -1111,8 +1121,10 @@ function renderSystem() {
   const sensors = o.temperatures.sensors;
   const localOk = o.temperatures.localStatus === 'Ok';
   const stale = sensors.filter((s) => sensorState(s) === 'stale').length;
-  const problems = (localOk ? 0 : 1) + stale;
-  const sensorBadge = !problems ? 'Tutti ok' : localOk ? `${stale} in ritardo` : `${problems} ${plural(problems, 'problema', 'problemi')}`;
+  const failed = sensors.filter((s) => sensorState(s) === 'error').length;
+  const problems = (localOk ? 0 : 1) + stale + failed;
+  const sensorBadge =
+    !problems ? 'Tutti ok' : localOk && !failed ? `${stale} in ritardo` : `${problems} ${plural(problems, 'problema', 'problemi')}`;
   const localValue = localOk
     ? o.temperatures.local !== null
       ? `<span class="mono">${fmt(o.temperatures.local)}°</span>`
@@ -1152,7 +1164,11 @@ function renderSystem() {
           ${sensors
             .map((s) => {
               const st = sensorState(s);
-              return healthRow('wifi', st === 'ok' ? 'b' : st === 'stale' ? 'a' : '', esc(s.location), `<span class="mono">${fmt(s.temperature)}°</span> · ${relative(s.timestamp)}`);
+              const value =
+                st === 'error'
+                  ? `<span class="mono">${esc(s.error || s.status)}</span>`
+                  : `<span class="mono">${fmt(s.temperature)}°</span> · ${relative(s.timestamp)}`;
+              return healthRow('wifi', st === 'error' ? 'r' : st === 'ok' ? 'b' : st === 'stale' ? 'a' : '', esc(s.location), value);
             })
             .join('')}
           ${healthRow('cloud', w ? 'b' : '', 'Esterno (Open-Meteo)', w ? `<span class="mono">${fmt(w.temperature)}°</span>${w.humidity !== null && w.humidity !== undefined ? ` · ${w.humidity}%` : ''} · ${relative(w.updatedAt)}` : 'Non disponibile')}
@@ -1225,7 +1241,7 @@ function seriesDash(id) {
 }
 
 function seriesColor(id) {
-  if (id === 'avg') return 'currentColor';
+  if (id === 'avg') return 'var(--series-avg)';
   const index = (state.history?.series || []).findIndex((s) => s.id === id);
   return `var(--series-${(Math.max(0, index) % 6) + 1})`;
 }
@@ -1394,11 +1410,11 @@ function temperatureChart() {
       <div class="chart-plot">
         <svg class="reveal" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
           ${grid}
-          ${band ? `<path d="${band}" fill="currentColor" fill-opacity=".08"/>` : ''}
+          ${band ? `<path d="${band}" fill="currentColor" style="color:var(--series-avg)" fill-opacity=".08"/>` : ''}
           ${sensorLines}
-          ${avgLine ? `<path d="${avgLine}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
+          ${avgLine ? `<path d="${avgLine}" fill="none" stroke="currentColor" style="color:var(--series-avg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
         </svg>
-        ${last ? `<span class="chart-dot" style="left:${((x(last.at.getTime()) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px"></span>` : ''}
+        ${last ? `<span class="chart-dot" style="left:${((x(last.at.getTime()) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px;background:var(--series-avg)"></span>` : ''}
       </div>
     </div>
     <div class="chart-x" style="margin-left:50px">${xLabels.map((l) => `<span>${l}</span>`).join('')}</div>

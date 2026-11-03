@@ -46,7 +46,9 @@ internal sealed record PanelSensorDto(
     double Temperature,
     DateTime Timestamp,
     bool Informational,
-    bool Fresh
+    bool Fresh,
+    string? Status,
+    string? Error
 );
 
 internal sealed record PanelTemperaturesDto(

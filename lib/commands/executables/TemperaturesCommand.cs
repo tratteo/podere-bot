@@ -74,20 +74,27 @@ internal class TemperaturesCommand(
         sb.AppendLine(probe.Status == LocalTemperatureStatus.Ok ? "🟢 <b>Temperature</b>" : "🔴 <b>Temperature</b>");
         sb.AppendLine();
         sb.AppendLine($"🏠 <b>Host</b> · {FormatTemperature(probe.Temperature)}");
-        var outdoor = await weather.GetAsync(TimeSpan.FromSeconds(3));
-        var humidity = outdoor?.Humidity is int relativeHumidity ? $" · {relativeHumidity}% UR" : "";
-        sb.AppendLine(
-            outdoor != null
-                ? $"🌤️ <b>Esterno (Open-Meteo)</b> · {outdoor.Temperature.ToString("0.0", Culture)} °C{humidity}"
-                : "🌤️ <b>Esterno (Open-Meteo)</b> · <i>non disponibile</i>"
-        );
         if (externals.Count == 0)
             sb.AppendLine("📡 <i>Nessun sensore remoto.</i>");
         foreach (var reading in externals)
         {
             var age = FormatAge(DateTime.UtcNow - reading.Timestamp);
-            sb.AppendLine($"📡 <b>{Escape(reading.Location)}</b> · {FormatTemperature(reading.Temperature)} <i>({age})</i>");
+            if (reading.HasError)
+                sb.AppendLine(
+                    $"⚠️ <b>{Escape(reading.Location)}</b> · <i>{Escape(reading.Error ?? reading.Status ?? "errore")}</i> <i>({age})</i>"
+                );
+            else
+                sb.AppendLine($"📡 <b>{Escape(reading.Location)}</b> · {FormatTemperature(reading.Temperature)} <i>({age})</i>");
         }
+
+        var outdoor = await weather.GetAsync(TimeSpan.FromSeconds(3));
+        var humidity = outdoor?.Humidity is int relativeHumidity ? $" · {relativeHumidity}% UR" : "";
+        sb.AppendLine();
+        sb.AppendLine(
+            outdoor != null
+                ? $"🌤️ <b>Esterno (Open-Meteo)</b> · {outdoor.Temperature.ToString("0.0", Culture)} °C{humidity}"
+                : "🌤️ <b>Esterno (Open-Meteo)</b> · <i>non disponibile</i>"
+        );
 
         if (probe.Status != LocalTemperatureStatus.Ok)
         {

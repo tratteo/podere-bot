@@ -42,7 +42,7 @@ internal sealed class TemperatureHistoryRecorder(
                     samples.Add(new SensorSample("local", "Locale", local));
                 foreach (var reading in temperatureReader.GetExternalTemperatureReadings())
                 {
-                    if (now - reading.Timestamp.ToUniversalTime() > sensorTolerance)
+                    if (reading.HasError || now - reading.Timestamp.ToUniversalTime() > sensorTolerance)
                         continue;
                     samples.Add(new SensorSample(reading.Id, reading.Location, reading.Temperature));
                 }

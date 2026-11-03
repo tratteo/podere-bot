@@ -51,6 +51,7 @@
   --series-4: #b48ac9;
   --series-5: #d98d8d;
   --series-6: #a3b86c;
+  --series-avg: #e8e3d5;
   --overlay: rgba(5, 6, 6, 0.72);
   --dialog: #171a18;
   --shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
@@ -91,6 +92,7 @@
   --series-4: #7a5797;
   --series-5: #a05252;
   --series-6: #667a2e;
+  --series-avg: #3b403c;
   --overlay: rgba(20, 20, 18, 0.32);
   --dialog: #ffffff;
   --shadow: 0 30px 80px rgba(0, 0, 0, 0.18);
@@ -870,6 +872,16 @@ button {
 .mini-value span {
   font-size: 14px;
   color: var(--dim);
+}
+
+.hero .k .srcbadge {
+  height: 24px;
+  margin-left: 10px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  letter-spacing: 0;
+  vertical-align: middle;
 }
 
 .hero-foot {

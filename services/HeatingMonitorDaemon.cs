@@ -42,6 +42,7 @@ internal sealed class HeatingMonitorDaemon(
     private bool outOfBandNotified;
     private bool antifreezeNotified;
     private readonly HashSet<string> staleSensors = [];
+    private readonly HashSet<string> failedSensors = [];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -189,27 +190,36 @@ internal sealed class HeatingMonitorDaemon(
 
     private async Task CheckSensorsAsync()
     {
-        // Only operational sensors raise alerts: informational readings are not used for control.
-        var known = temperatureDriver.GetExternalTemperatureReadings().Where(r => !r.Informational).ToList();
+        // Only operational sensors raise control alerts: informational readings are not used for control.
+        var all = temperatureDriver.GetExternalTemperatureReadings();
+        var known = all.Where(r => !r.Informational && !r.HasError).ToList();
         var fresh = temperatureDriver.GetExternalTemperatureReadings(sensorTolerance).Where(r => !r.Informational).ToList();
         var freshIds = fresh.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var failed = all.Where(r => r.HasError).ToList();
+        var failedIds = failed.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         if (!sensorsInitialized)
         {
             sensorsInitialized = true;
             staleSensors.Clear();
+            failedSensors.Clear();
             foreach (var reading in known)
                 if (!freshIds.Contains(reading.Id))
                     staleSensors.Add(reading.Id);
+            foreach (var reading in failed)
+                failedSensors.Add(reading.Id);
             return;
         }
 
         if (!startup.Ready)
         {
             staleSensors.Clear();
+            failedSensors.Clear();
             foreach (var reading in known)
                 if (!freshIds.Contains(reading.Id))
                     staleSensors.Add(reading.Id);
+            foreach (var reading in failed)
+                failedSensors.Add(reading.Id);
             return;
         }
 
@@ -235,6 +245,29 @@ internal sealed class HeatingMonitorDaemon(
             await bot.NotifyTopicAsync(
                 NotificationTopic.Technical,
                 $"✅ Il sensore <b>{Encode(reading.Location)}</b> è tornato a inviare letture."
+            );
+        }
+
+        foreach (var reading in failed)
+        {
+            if (!failedSensors.Add(reading.Id))
+                continue;
+
+            await bot.NotifyTopicAsync(
+                NotificationTopic.Technical,
+                $"⚠️ Il sensore <b>{Encode(reading.Location)}</b> segnala un problema: <i>{Encode(reading.Error ?? reading.Status ?? "errore")}</i>."
+            );
+        }
+
+        foreach (var id in failedSensors.Where(id => !failedIds.Contains(id)).ToList())
+        {
+            failedSensors.Remove(id);
+            var reading = all.FirstOrDefault(r => string.Equals(r.Id, id, StringComparison.OrdinalIgnoreCase));
+            if (reading == null)
+                continue;
+            await bot.NotifyTopicAsync(
+                NotificationTopic.Technical,
+                $"✅ Il sensore <b>{Encode(reading.Location)}</b> è tornato operativo."
             );
         }
     }

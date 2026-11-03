@@ -51,11 +51,16 @@ internal sealed class PanelSnapshotService(
                 r.Temperature,
                 r.Timestamp,
                 r.Informational,
-                fresh.Contains(r.Id)
+                fresh.Contains(r.Id),
+                r.Status,
+                r.Error
             ))
             .ToList();
 
-        var operational = external.Where(r => !r.Informational && fresh.Contains(r.Id)).Select(r => (double)r.Temperature).ToList();
+        var operational = external
+            .Where(r => !r.Informational && !r.HasError && fresh.Contains(r.Id))
+            .Select(r => (double)r.Temperature)
+            .ToList();
         if (probe.Temperature.HasValue)
             operational.Add(probe.Temperature.Value);
 
@@ -177,6 +182,16 @@ internal sealed class PanelSnapshotService(
                     $"sensor-{sensor.Id}",
                     $"Sensore {sensor.Location} in ritardo",
                     $"Ultima lettura {FormatAge(DateTime.UtcNow - sensor.Timestamp)}",
+                    "system"
+                )
+            );
+
+        foreach (var sensor in sensors.Where(s => !string.IsNullOrWhiteSpace(s.Status)))
+            alerts.Add(
+                new PanelAlertDto(
+                    $"sensor-error-{sensor.Id}",
+                    $"Sensore {sensor.Location} in errore",
+                    sensor.Error ?? sensor.Status ?? "errore",
                     "system"
                 )
             );

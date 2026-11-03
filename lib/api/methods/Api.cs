@@ -13,7 +13,7 @@ internal record GetStatusResponse
 
 internal record PostTemperatureBody
 {
-    [Required]
+    /// <summary>Null is allowed only together with a status, for a sensor error report.</summary>
     public float? Temperature { get; init; }
 
     /// <summary>Unix seconds. Optional: a sensor without NTP falls back to the server clock.</summary>
@@ -28,15 +28,21 @@ internal record PostTemperatureBody
     public string? Com { get; init; }
 
     public bool Informational { get; init; }
+
+    /// <summary>Short error code when the sensor cannot produce a value, e.g. sensor_missing.</summary>
+    public string? Status { get; init; }
+    public string? Error { get; init; }
 }
 
 internal record TemperatureDto
 {
     public required string Id { get; init; }
     public required string Location { get; init; }
-    public required double Temperature { get; init; }
+    public double? Temperature { get; init; }
     public required DateTime Timestamp { get; init; }
     public bool Informational { get; init; }
+    public string? Status { get; init; }
+    public string? Error { get; init; }
 }
 
 internal record GetTemperaturesResponse
@@ -95,16 +101,25 @@ internal class Api : IEndpoint
         ITemperatureDriver temperatureDriver
     )
     {
+        var status = string.IsNullOrWhiteSpace(body.Status) ? null : body.Status.Trim();
+        if (body.Temperature == null && status == null)
+        {
+            logger.LogWarning("temperature report without a value or status from {s}", body.SensorId);
+            return TypedResults.BadRequest();
+        }
+
         temperatureDriver.PostTemperatureReading(
             new TemperatureReading()
             {
                 Id = body.SensorId ?? "",
-                Temperature = (float)body.Temperature!,
+                Temperature = body.Temperature ?? TemperatureReading.ErrorCelsius,
                 Timestamp = body.Timestamp is > 0
                     ? DateTime.UnixEpoch.AddSeconds(body.Timestamp.Value)
                     : DateTime.UtcNow,
                 Location = body.Location!,
-                Informational = body.Informational,
+                Informational = body.Informational || status != null,
+                Status = status,
+                Error = status == null ? null : string.IsNullOrWhiteSpace(body.Error) ? status : body.Error.Trim(),
             }
         );
 
@@ -141,7 +156,10 @@ internal class Api : IEndpoint
         var probe = await temperatureDriver.ProbeLocalTemperature();
         var readings = temperatureDriver.GetExternalTemperatureReadings();
 
-        var operational = readings.Where(r => !r.Informational).Select(r => (double)r.Temperature).ToList();
+        var operational = readings
+            .Where(r => !r.Informational && !r.HasError)
+            .Select(r => (double)r.Temperature)
+            .ToList();
         if (probe.Temperature.HasValue)
             operational.Add(probe.Temperature.Value);
 
@@ -156,9 +174,11 @@ internal class Api : IEndpoint
                     {
                         Id = r.Id,
                         Location = r.Location,
-                        Temperature = r.Temperature,
+                        Temperature = r.HasError ? null : r.Temperature,
                         Timestamp = r.Timestamp,
                         Informational = r.Informational,
+                        Status = r.Status,
+                        Error = r.Error,
                     })
                     .ToList(),
             }

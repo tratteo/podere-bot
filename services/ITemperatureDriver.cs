@@ -1,5 +1,8 @@
 internal record TemperatureReading
 {
+    /// <summary>Sentinel for a report that carries an error instead of a value.</summary>
+    public const float ErrorCelsius = -127f;
+
     public required float Temperature { get; init; }
 
     public required DateTime Timestamp { get; init; }
@@ -7,6 +10,12 @@ internal record TemperatureReading
     public required string Id { get; init; }
     public required string Location { get; init; }
     public bool Informational { get; init; }
+
+    /// <summary>Null for a normal reading; a short code such as sensor_missing for a failure.</summary>
+    public string? Status { get; init; }
+    public string? Error { get; init; }
+
+    public bool HasError => !string.IsNullOrWhiteSpace(Status);
 }
 
 internal enum LocalTemperatureStatus

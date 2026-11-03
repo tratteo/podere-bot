@@ -101,7 +101,14 @@ internal class StatusCommand(
         foreach (var reading in temperatureDriver.GetExternalTemperatureReadings())
         {
             var age = DateTime.UtcNow - reading.Timestamp;
-            rows.Add((Escape(reading.Location), $"{reading.Temperature.ToString("0.0", Culture)} °C · {FormatAge(age)}"));
+            rows.Add(
+                (
+                    Escape(reading.Location),
+                    reading.HasError
+                        ? $"errore · {Escape(reading.Error ?? reading.Status ?? "sconosciuto")}"
+                        : $"{reading.Temperature.ToString("0.0", Culture)} °C · {FormatAge(age)}"
+                )
+            );
         }
 
         return rows;

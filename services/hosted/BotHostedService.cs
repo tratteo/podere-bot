@@ -22,13 +22,8 @@ internal class BotHostedService : IHostedService
     private readonly IConfiguration configuration;
     private readonly PendingInputRegistry pendingInputs;
     private readonly UserDirectory users;
-    private readonly ITemperatureDriver temperatureReader;
-    private readonly HeatingDriver heatingDriver;
-    private readonly Database db;
     private readonly StartupGate startup;
     private readonly NotificationLog log;
-    private readonly WeatherService weather;
-    private readonly TimeSpan sensorTolerance;
     private DateTime startedUtc;
     private readonly List<BotCommand> allCommands;
     private readonly List<BotCommand> publicCommands;
@@ -49,12 +44,8 @@ internal class BotHostedService : IHostedService
         IServiceProvider services,
         PendingInputRegistry pendingInputs,
         UserDirectory users,
-        ITemperatureDriver temperatureReader,
-        HeatingDriver heatingDriver,
-        Database db,
         StartupGate startup,
-        NotificationLog log,
-        WeatherService weather
+        NotificationLog log
     )
     {
         this.logger = logger;
@@ -62,15 +53,8 @@ internal class BotHostedService : IHostedService
         this.services = services;
         this.pendingInputs = pendingInputs;
         this.users = users;
-        this.temperatureReader = temperatureReader;
-        this.heatingDriver = heatingDriver;
-        this.db = db;
         this.startup = startup;
         this.log = log;
-        this.weather = weather;
-        sensorTolerance = TimeSpan.FromSeconds(
-            Math.Max(10, configuration.GetValue<int?>("Heating:TempSensorsToleranceSeconds") ?? 60)
-        );
         heartbeatInterval = TimeSpan.FromSeconds(
             Math.Max(30, configuration.GetValue<int?>("Telegram:HeartbeatSeconds") ?? 120)
         );
@@ -91,6 +75,9 @@ internal class BotHostedService : IHostedService
         Client.OnMessage += OnMessage;
         startedUtc = DateTime.UtcNow;
         heartbeat = new Timer(_ => _ = PingAsync(), null, heartbeatInterval, heartbeatInterval);
+
+        // Say hello immediately, before the slower Telegram setup.
+        await TrySendStartupSummaryAsync();
 
         await TryInitializeAsync(cancellationToken);
 
@@ -138,19 +125,18 @@ internal class BotHostedService : IHostedService
         }
 
         if (initialized)
-            await TrySendStartupSummaryAsync(cancellationToken);
+            await TrySendStartupSummaryAsync();
     }
 
-    private async Task TrySendStartupSummaryAsync(CancellationToken cancellationToken)
+    private async Task TrySendStartupSummaryAsync()
     {
-        if (summarySent || !startup.ShouldAnnounce)
+        if (summarySent)
             return;
 
         try
         {
-            await SendStartupSummaryAsync(cancellationToken);
+            await SendStartupSummaryAsync();
             summarySent = true;
-            startup.MarkAnnounced();
         }
         catch (Exception ex)
         {
@@ -220,132 +206,8 @@ internal class BotHostedService : IHostedService
         await Client.NotifyUsers(message, list, logger);
     }
 
-    private async Task SendStartupSummaryAsync(CancellationToken cancellationToken)
-    {
-        var data = db.Data;
-        var probe = await temperatureReader.ProbeLocalTemperature(cancellationToken);
-        var external = temperatureReader
-            .GetExternalTemperatureReadings()
-            .Where(r => !r.Informational)
-            .ToList();
-        var fresh = temperatureReader
-            .GetExternalTemperatureReadings(sensorTolerance)
-            .Where(r => !r.Informational)
-            .ToList();
-        var freshIds = fresh.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var stale = external.Where(r => !freshIds.Contains(r.Id)).ToList();
-        var boiler = heatingDriver.IsBoilerActive();
-
-        var operationalTemperatures = fresh.Select(r => r.Temperature).ToList();
-        if (probe.Temperature != null)
-            operationalTemperatures.Add(probe.Temperature.Value);
-        float? operational = operationalTemperatures.Count > 0 ? operationalTemperatures.Average() : null;
-
-        var sb = new StringBuilder();
-        sb.AppendLine("🤖 <b>Presente</b>");
-        sb.AppendLine($"<i>{DateTime.Now:dd/MM · HH:mm}</i>");
-        sb.AppendLine();
-        sb.AppendLine($"🔥 Caldaia: <b>{(boiler ? "accesa" : "spenta")}</b>");
-        sb.AppendLine($"🌡️ Operativa: <b>{(operational != null ? $"{operational.Value:0.0} °C" : "n/d")}</b>");
-        if (probe.Status == LocalTemperatureStatus.Ok && probe.Temperature != null)
-            sb.AppendLine($"🌡️ Locale: <b>{probe.Temperature.Value:0.0} °C</b>");
-        else
-            sb.AppendLine($"🌡️ Locale: <b>non disponibile</b> <i>({TemperatureCause(probe.Status)})</i>");
-        var outdoor = await weather.GetAsync(TimeSpan.FromSeconds(8), cancellationToken);
-        var humidity = outdoor?.Humidity is int relativeHumidity ? $" · {relativeHumidity}% UR" : "";
-        sb.AppendLine(
-            outdoor != null
-                ? $"🌤️ Esterno: <b>{outdoor.Temperature:0.0} °C</b>{humidity} <i>(Open-Meteo)</i>"
-                : "🌤️ Esterno: <b>non disponibile</b> <i>(Open-Meteo)</i>"
-        );
-        sb.AppendLine($"📡 Sensori esterni: {DescribeExternal(external.Count, fresh.Count)}");
-        sb.AppendLine($"📅 Programma: {DescribeProgram(data.HeatingProgram)}");
-        sb.AppendLine($"🔐 Cancelli: {DescribeGates(data.GatesOpenAccessExpirationDate)}");
-
-        var warnings = new List<string>();
-        if (probe.Status != LocalTemperatureStatus.Ok)
-            warnings.Add($"Sensore locale non disponibile: {TemperatureCause(probe.Status)}.");
-        foreach (var reading in stale)
-            warnings.Add($"Sensore {WebUtility.HtmlEncode(reading.Location)} fermo da {FormatAge(DateTime.UtcNow - reading.Timestamp)}.");
-        if (data.HeatingProgram?.IsSuspended == true)
-            warnings.Add("Programma di riscaldamento sospeso.");
-        if (data.GatesOpenAccessExpirationDate is DateTime expiration && expiration > DateTime.Now)
-            warnings.Add($"Finestra cancelli aperta fino alle {expiration:HH:mm}.");
-        if (operational != null)
-        {
-            var antifreeze = OptionsReader.ReadAntifreeze(configuration);
-            var band = OptionsReader.ReadTemperatureBand(configuration);
-            if (antifreeze.Enabled && HeatingPolicies.AntifreezeShouldEngage(operational.Value, antifreeze))
-                warnings.Add($"Antigelo attivo: {operational.Value:0.0} °C sotto la soglia di {antifreeze.ThresholdCelsius:0.0} °C.");
-            if (HeatingPolicies.IsOutOfBand(operational.Value, band))
-                warnings.Add($"Temperatura operativa fuori banda: {operational.Value:0.0} °C.");
-        }
-
-        if (warnings.Count > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine("<b>⚠️ Attenzione</b>");
-            foreach (var warning in warnings)
-                sb.AppendLine($"• {warning}");
-        }
-
-        await NotifyTopicAsync(NotificationTopic.Technical, sb.ToString().TrimEnd());
-    }
-
-    private static string DescribeExternal(int total, int fresh)
-    {
-        if (total == 0)
-            return "nessun sensore";
-        if (fresh == total)
-            return $"{total} attivi";
-        return $"{fresh}/{total} attivi";
-    }
-
-    private static string DescribeProgram(HeatingProgram? program)
-    {
-        if (program == null)
-            return "nessuno";
-        if (program.IsSuspended)
-            return "sospeso";
-        var current = program.GetCurrentInterval();
-        if (current != null)
-            return $"in corso {FormatTime(current.FromTimestamp)}–{FormatTime(current.ToTimestamp)} @ {current.Temperature:0.#}°";
-        var next = program.GetNextInterval();
-        if (next != null)
-            return $"prossimo {FormatTime(next.FromTimestamp)}–{FormatTime(next.ToTimestamp)} @ {next.Temperature:0.#}°";
-        return "nessun intervallo attivo";
-    }
-
-    private static string DescribeGates(DateTime? expiration)
-    {
-        if (expiration is DateTime value && value > DateTime.Now)
-            return $"aperta fino alle {value:HH:mm}";
-        return "chiusa";
-    }
-
-    private static string TemperatureCause(LocalTemperatureStatus status) =>
-        status switch
-        {
-            LocalTemperatureStatus.DevicesRootMissing => "configurazione",
-            LocalTemperatureStatus.BusMasterMissing => "configurazione",
-            LocalTemperatureStatus.NoSensors => "hardware",
-            LocalTemperatureStatus.CrcError => "segnale",
-            LocalTemperatureStatus.ReadError => "hardware",
-            LocalTemperatureStatus.ParseError => "firmware",
-            _ => "ok",
-        };
-
-    private static string FormatTime(int seconds) => $"{seconds / 3600:00}:{seconds % 3600 / 60:00}";
-
-    private static string FormatAge(TimeSpan age)
-    {
-        if (age.TotalMinutes < 90)
-            return $"{age.TotalMinutes:0} min";
-        if (age.TotalHours < 36)
-            return $"{age.TotalHours:0} h";
-        return $"{age.TotalDays:0} g";
-    }
-
+    private Task SendStartupSummaryAsync() =>
+        NotifyTopicAsync(NotificationTopic.Technical, "Ce sto");
     public DateTime? LastTelegramContactUtc => lastTelegramContactUtc;
 
     public bool IsTelegramHealthy =>
@@ -365,7 +227,7 @@ internal class BotHostedService : IHostedService
             else if (wasDown)
                 await SendRecoverySummaryAsync();
             else
-                await TrySendStartupSummaryAsync(CancellationToken.None);
+                await TrySendStartupSummaryAsync();
         }
         catch (Exception ex)
         {
@@ -384,7 +246,7 @@ internal class BotHostedService : IHostedService
         try
         {
             logger.LogInformation("telegram is back, sending the summary");
-            await SendStartupSummaryAsync(CancellationToken.None);
+            await SendStartupSummaryAsync();
         }
         catch (Exception ex)
         {
@@ -397,7 +259,7 @@ internal class BotHostedService : IHostedService
         try
         {
             if (startedUtc != default && DateTime.UtcNow - startedUtc > TimeSpan.FromMinutes(10))
-                await NotifyTopicAsync(NotificationTopic.Technical, "PodereBot offline.");
+                await NotifyTopicAsync(NotificationTopic.Technical, "me so scocciato, me dò");
         }
         catch (Exception ex)
         {
