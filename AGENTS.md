@@ -63,8 +63,6 @@ Three Kestrel ports: `0.0.0.0:5050` for the REST API and MCP, `127.0.0.1:5051` f
 
 Devices are authorised per device, never by client IP, MAC or hostname. The kiosk (or `panel-pair.sh`, which uses the token on 5051) creates a device name and a single-use link, returns it once with a server-generated QR SVG (`QRCoder`), and stores only the SHA-256 hash. Redeeming the link on 5052 sets the `poderebot_panel` cookie (HttpOnly, SameSite=Strict, `Panel:SessionDays`); every request is checked against the stored key hash. Revoking a device deletes it from the list, frees its name and invalidates the cookie. Writes on 5052 also require `X-Panel: 1` and a same-origin `Origin`. The QR and the cookie travel in clear text over HTTP: use HTTPS or Tailscale on a real network.
 
-`Panel:Https=true` serves the LAN panel on 5052 over HTTPS using `panel.pfx` from the content root. `scripts/make-cert.sh` creates a self-signed certificate valid for 100 years for `poderebot.local`, `localhost` and the LAN IP; `Panel:CertPassword` must match the PFX password. Pairing links then use `https://` and the session cookie becomes `Secure`. Devices must trust `panel.crt` as a root CA (Chrome: `certutil -addstore -user Root panel.crt` on Windows, or install it as a CA certificate on Android). The API, kiosk and updater stay on HTTP.
-
 `Panel:LanHost` must be a stable Pi address or name (`poderebot.local`), because the cookie is bound to that origin. Without it the first non-loopback IPv4 is used, preferring `192.168.x`.
 
 User names in the panel come from `users.json` when set, otherwise from Telegram (`GetChat`, cached for a day). The pencil on a user card edits the stored name; clearing it falls back to Telegram.

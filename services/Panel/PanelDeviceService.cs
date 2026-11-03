@@ -275,8 +275,7 @@ internal sealed class PanelDeviceService(
 
     private PairingTicket BuildTicket(string id, string name, string host, string token, DateTime expiresAt)
     {
-        var scheme = options.Https ? "https" : "http";
-        var url = $"{scheme}://{host}:{options.LanPort}/panel/pair?token={Uri.EscapeDataString(token)}";
+        var url = $"http://{host}:{options.LanPort}/panel/pair?token={Uri.EscapeDataString(token)}";
         return new PairingTicket(id, name, url, BuildQr(url), expiresAt);
     }
 

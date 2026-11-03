@@ -1,10 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Server;
 using System.ClientModel;
@@ -24,24 +22,9 @@ DotNetEnv.Env.Load();
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddEnvironmentVariables();
 var panelOptions = OptionsReader.ReadPanel(builder.Configuration);
-var panelScheme = panelOptions.Https ? "https" : "http";
 builder.WebHost.UseUrls(
-    $"http://0.0.0.0:5050;http://127.0.0.1:{PanelOptions.KioskPort};{panelScheme}://0.0.0.0:{panelOptions.LanPort}"
+    $"http://0.0.0.0:5050;http://127.0.0.1:{PanelOptions.KioskPort};http://0.0.0.0:{panelOptions.LanPort}"
 );
-if (panelOptions.Https)
-{
-    var certificatePath = Path.Join(builder.Environment.ContentRootPath, "panel.pfx");
-    if (!File.Exists(certificatePath))
-        throw new InvalidOperationException(
-            $"Panel:Https is enabled but {certificatePath} is missing. Run scripts/make-cert.sh first."
-        );
-    var certificatePassword = builder.Configuration.GetValue<string>("Panel:CertPassword") ?? "";
-    builder.WebHost.ConfigureKestrel(options =>
-        options.ConfigureHttpsDefaults(https =>
-            https.ServerCertificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath, certificatePassword)
-        )
-    );
-}
 builder.Services.Configure<ConsoleLifetimeOptions>(options => options.SuppressStatusMessages = true);
 builder.Services.AddCommands();
 if (builder.Environment.IsDevelopment())

@@ -309,7 +309,6 @@ internal class PanelApi : IEndpoint
                 Path = "/panel",
                 MaxAge = TimeSpan.FromDays(devices.Options.SessionDays),
                 IsEssential = true,
-                Secure = devices.Options.Https,
             }
         );
         log.RecordPanel($"Dispositivo \"{paired.Name}\" accoppiato");

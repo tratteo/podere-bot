@@ -95,22 +95,6 @@ pwsh scripts/demo.ps1
 
 The script creates a temporary content root with a seeded `panel.db` (local probe plus three sample sensors), sample version metadata and a fake Telegram token, then serves the panel at `http://127.0.0.1:5051/panel/#heating`. Stop it with `pwsh scripts/demo.ps1 -Stop`.
 
-## HTTPS for the LAN panel
-
-`scripts/make-cert.sh [host] [ip]` creates a self-signed certificate valid for 100 years for `poderebot.local`, `localhost` and the Pi IP. It writes `panel.crt`, `panel.key` and `panel.pfx` (password `poderebot` by default). Then set:
-
-```json
-"Panel": { "Https": true, "CertPassword": "poderebot" }
-```
-
-The LAN panel on 5052 switches to HTTPS, pairing links use `https://` and the session cookie becomes `Secure`. Trust `panel.crt` on the devices:
-
-- Windows: `certutil -addstore -user Root panel.crt`
-- Android: install `panel.crt` as a CA certificate
-- Chrome on the Pi kiosk is not affected: 5051 stays on HTTP
-
-The API, the kiosk port and the updater remain on HTTP.
-
 ## Settings
 
 `.env`:
