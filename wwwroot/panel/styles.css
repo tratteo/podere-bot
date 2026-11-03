@@ -1792,6 +1792,73 @@ button {
   }
 }
 
+.chart-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: currentColor;
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.chart-tip {
+  position: absolute;
+  top: 8px;
+  z-index: 6;
+  min-width: 168px;
+  max-width: 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.chart-tip[hidden],
+.chart-cursor[hidden] {
+  display: none;
+}
+
+.chart-tip .tip-time {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.chart-tip .tip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.7;
+}
+
+.chart-tip .tip-row i {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.chart-tip .tip-row span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chart-tip .tip-row b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
 .chart-empty {
   display: flex;
   align-items: center;

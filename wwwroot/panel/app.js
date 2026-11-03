@@ -570,6 +570,7 @@ function render(full = false) {
   renderAura();
   renderIdle();
   tickLive();
+  reapplyChartHover();
 }
 
 function skeleton() {
@@ -1302,7 +1303,10 @@ function updateSeriesUI() {
   const label = $('series-label');
   if (label) label.textContent = seriesButtonLabel();
   const body = $('chart-body');
-  if (body) body.innerHTML = temperatureChart();
+  if (body) {
+    body.innerHTML = temperatureChart();
+    reapplyChartHover();
+  }
 }
 
 /** Catmull-Rom style smoothing: keeps the points, rounds the corners between them. */
@@ -1327,7 +1331,77 @@ function smoothPath(points) {
   return d;
 }
 
+let chartHover = null;
+let chartHoverTimer = null;
+let chartHoverX = null;
+
+function hideChartHover() {
+  clearTimeout(chartHoverTimer);
+  chartHoverX = null;
+  document.querySelectorAll('.chart-cursor, .chart-tip').forEach((el) => {
+    el.hidden = true;
+  });
+}
+
+function updateChartHover(event) {
+  const plot = event.target.closest('.chart-plot');
+  if (!plot) {
+    hideChartHover();
+    return;
+  }
+  chartHoverX = event.clientX;
+  showChartHoverAt(plot, event.clientX);
+}
+
+function reapplyChartHover() {
+  if (chartHoverX == null) return;
+  const plot = document.querySelector('.chart-plot');
+  if (!plot || !chartHover) return;
+  showChartHoverAt(plot, chartHoverX);
+}
+
+function showChartHoverAt(plot, clientX) {
+  if (!chartHover) return;
+  const cursor = plot.querySelector('.chart-cursor');
+  const tip = plot.querySelector('.chart-tip');
+  if (!cursor || !tip) return;
+
+  const rect = plot.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  const targetMs = chartHover.t0 + ratio * chartHover.span;
+  let nearest = chartHover.ref[0];
+  for (const point of chartHover.ref) {
+    if (Math.abs(point.ms - targetMs) < Math.abs(nearest.ms - targetMs)) nearest = point;
+  }
+
+  const left = ((nearest.ms - chartHover.t0) / chartHover.span) * rect.width;
+  cursor.hidden = false;
+  cursor.style.left = `${left}px`;
+
+  const rows = chartHover.series
+    .map((series) => {
+      let best = null;
+      for (const point of series.points) {
+        if (!best || Math.abs(point.ms - nearest.ms) < Math.abs(best.ms - nearest.ms)) best = point;
+      }
+      if (!best) return '';
+      return `<div class="tip-row"><i style="background:${series.color}"></i><span>${esc(series.label)}</span><b>${fmt(best.value)}°</b></div>`;
+    })
+    .join('');
+
+  const time = chartHover.bucket === 'day' ? fmtDate(nearest.at) : fmtTime(nearest.at);
+  tip.innerHTML = `<span class="tip-time">${esc(time)}</span>${rows}`;
+  tip.hidden = false;
+  const tipWidth = tip.offsetWidth;
+  let tipLeft = left + 14;
+  if (tipLeft + tipWidth > rect.width) tipLeft = left - tipWidth - 14;
+  tip.style.left = `${Math.max(4, tipLeft)}px`;
+  tip.style.top = '8px';
+}
+
 function temperatureChart() {
+  chartHover = null;
   const data = state.history;
   if (!data) return `<div class="chart-empty"><span class="spinner"></span><span>Carico lo storico…</span></div>`;
   if (data.error) return `<div class="chart-empty">${icon('alert')}<span>${esc(data.error)}</span></div>`;
@@ -1405,6 +1479,28 @@ function temperatureChart() {
     ? `<span>Min <b>${fmt(avgMin)}°</b></span><span>Max <b>${fmt(avgMax)}°</b></span><span>Media <b>${fmt(avg)}°</b></span><span>${avgPoints.length} ${data.bucket === 'day' ? 'giorni' : 'ore'}</span>`
     : `<span>${series.length} serie</span>`;
 
+  const hoverSeries = [];
+  if (drawAvg)
+    hoverSeries.push({
+      id: 'avg',
+      label: 'Media',
+      color: seriesColor('avg'),
+      points: avgPoints.map((p) => ({ ms: p.at.getTime(), at: p.at, value: p.avg })),
+    });
+  for (const s of series) {
+    hoverSeries.push({
+      id: s.id,
+      label: s.label,
+      color: seriesColor(s.id),
+      points: s.points.map((p) => {
+        const at = new Date(p.at);
+        return { ms: at.getTime(), at, value: p.value };
+      }),
+    });
+  }
+  const hoverRef = hoverSeries[0]?.points || [];
+  chartHover = hoverRef.length ? { t0, span, bucket: data.bucket, ref: hoverRef, series: hoverSeries } : null;
+
   return `<div data-key="${esc(key)}">
     <div class="chart">
       <div class="chart-y">${yLabels}</div>
@@ -1416,6 +1512,8 @@ function temperatureChart() {
           ${avgLine ? `<path d="${avgLine}" fill="none" stroke="currentColor" style="color:var(--series-avg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
         </svg>
         ${last ? `<span class="chart-dot" style="left:${((x(last.at.getTime()) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px;background:var(--series-avg)"></span>` : ''}
+        <span class="chart-cursor" hidden></span>
+        <div class="chart-tip" hidden></div>
       </div>
     </div>
     <div class="chart-x" style="margin-left:50px">${xLabels.map((l) => `<span>${l}</span>`).join('')}</div>
@@ -2357,11 +2455,30 @@ const ACTIONS = {
   },
 };
 
+document.addEventListener('pointermove', (event) => {
+  if (event.target.closest('.chart-plot')) updateChartHover(event);
+  else hideChartHover();
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (event.target.closest('.chart-plot')) {
+    clearTimeout(chartHoverTimer);
+    updateChartHover(event);
+  }
+});
+
+document.addEventListener('pointerup', (event) => {
+  if (event.pointerType === 'touch' && chartHover) chartHoverTimer = setTimeout(hideChartHover, 3000);
+});
+
+document.addEventListener('pointerout', (event) => {
+  if (!event.relatedTarget) hideChartHover();
+});
+
 document.addEventListener('click', (event) => {
   if (!event.target.closest('#series-picker')) closeSeriesMenu();
 
-  const nav = event.target.closest('[data-nav]');
-  if (nav) {
+  const nav = event.target.closest('[data-nav]');  if (nav) {
     setView(nav.dataset.nav);
     return;
   }
