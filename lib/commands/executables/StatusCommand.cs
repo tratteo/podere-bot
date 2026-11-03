@@ -34,13 +34,17 @@ internal class StatusCommand(
         sb.AppendLine($"{StatusDot(percent, weeklyBudget)} <b>PodereBot</b>");
         sb.AppendLine();
         sb.AppendLine("<b>Sistema</b>");
-        sb.AppendLine($"<pre>{BuildSystemBlock(process, uptime)}</pre>");
+        AppendRows(sb, BuildSystemRows(process, uptime));
         sb.AppendLine();
         sb.AppendLine("<b>Sensori</b>");
-        sb.AppendLine($"<pre>{await BuildSensorsBlockAsync()}</pre>");
+        var sensorRows = await BuildSensorsRowsAsync();
+        if (sensorRows.Count == 0)
+            sb.AppendLine("• Nessun sensore operativo");
+        else
+            AppendRows(sb, sensorRows);
         sb.AppendLine();
         sb.AppendLine("<b>Salute</b>");
-        sb.AppendLine($"<pre>{BuildHealthBlock(healthService.Check())}</pre>");
+        AppendRows(sb, BuildHealthRows(healthService.Check()));
         sb.AppendLine();
         sb.AppendLine($"<b>OpenCode Go · ultimi {UsageDays} giorni</b>");
 
@@ -63,7 +67,13 @@ internal class StatusCommand(
         );
     }
 
-    private static string BuildSystemBlock(Process process, TimeSpan uptime)
+    private static void AppendRows(StringBuilder sb, IEnumerable<(string Label, string Value)> rows)
+    {
+        foreach (var (label, value) in rows)
+            sb.AppendLine($"• <b>{label}</b> · {value}");
+    }
+
+    private static List<(string Label, string Value)> BuildSystemRows(Process process, TimeSpan uptime)
     {
         var rows = new List<(string Label, string Value)>
         {
@@ -79,70 +89,32 @@ internal class StatusCommand(
         if (temperature != null)
             rows.Add(("CPU", $"{temperature.Value.ToString("0.0", Culture)} °C"));
 
-        var width = rows.Max(r => r.Label.Length);
-        var sb = new StringBuilder();
-        foreach (var (label, value) in rows)
-        {
-            if (sb.Length > 0)
-                sb.Append('\n');
-            sb.Append(label.PadRight(width)).Append("  ").Append(value);
-        }
-        return sb.ToString();
+        return rows;
     }
 
-    private async Task<string> BuildSensorsBlockAsync()
+    private async Task<List<(string Label, string Value)>> BuildSensorsRowsAsync()
     {
         var rows = new List<(string Label, string Value)>();
         var probe = await temperatureDriver.ProbeLocalTemperature();
-        rows.Add(
-            (
-                "Locale",
-                probe.Temperature.HasValue ? $"{probe.Temperature.Value.ToString("0.0", Culture)} \u00b0C ({probe.Status})" : probe.Status.ToString()
-            )
-        );
+        rows.Add(("Locale", probe.Temperature.HasValue ? $"{probe.Temperature.Value.ToString("0.0", Culture)} °C" : probe.Status.ToString()));
 
         foreach (var reading in temperatureDriver.GetExternalTemperatureReadings())
         {
             var age = DateTime.UtcNow - reading.Timestamp;
-            rows.Add((reading.Location, $"{reading.Temperature.ToString("0.0", Culture)} \u00b0C ({FormatAge(age)})"));
+            rows.Add((Escape(reading.Location), $"{reading.Temperature.ToString("0.0", Culture)} °C · {FormatAge(age)}"));
         }
 
-        if (rows.Count == 1 && !probe.Temperature.HasValue)
-            return "Nessun sensore operativo.";
-
-        return BuildAlignedBlock(rows);
+        return rows;
     }
 
-    private static string BuildHealthBlock(HealthReport report)
-    {
-        var rows = new List<(string Label, string Value)>
-        {
-            ("Telegram", report.TelegramOk ? "ok" : "non connesso"),
-            ("Database", report.DatabaseOk ? "scrivibile" : "non scrivibile"),
-            (
-                "Throttled",
-                report.Throttled ?? "non disponibile"
-            ),
-        };
+    private static List<(string Label, string Value)> BuildHealthRows(HealthReport report) =>
+    [
+        ("Telegram", report.TelegramOk ? "ok" : "non connesso"),
+        ("Database", report.DatabaseOk ? "scrivibile" : "non scrivibile"),
+        ("Alimentazione", report.Throttled ?? "non disponibile"),
+    ];
 
-        if (report.CpuTemperatureCelsius is double cpu)
-            rows.Add(("CPU", $"{cpu.ToString("0.0", Culture)} \u00b0C"));
-
-        return BuildAlignedBlock(rows);
-    }
-
-    private static string BuildAlignedBlock(List<(string Label, string Value)> rows)
-    {
-        var width = rows.Max(r => r.Label.Length);
-        var sb = new StringBuilder();
-        foreach (var (label, value) in rows)
-        {
-            if (sb.Length > 0)
-                sb.Append('\n');
-            sb.Append(label.PadRight(width)).Append("  ").Append(value);
-        }
-        return sb.ToString();
-    }
+    private static string Escape(string value) => value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
     private static string FormatAge(TimeSpan age)
     {

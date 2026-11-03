@@ -84,14 +84,16 @@ internal class PanelApi : IEndpoint
         group.MapGet("/history", GetHistory).WithName("panel-history");
         group.MapGet("/events", GetEvents).WithName("panel-events");
 
-        group.MapPost("/heating/on", (HttpContext c, HeatingControlService s, PanelSnapshotService snap) => Write(c, snap, () =>
+        group.MapPost("/heating/on", (HttpContext c, HeatingControlService s, PanelSnapshotService snap, BoilerNotifier notifier) => Write(c, snap, () =>
         {
             s.SetBoiler(true);
+            _ = notifier.NotifyAsync(true);
             return Task.CompletedTask;
         }, "Caldaia accesa"));
-        group.MapPost("/heating/off", (HttpContext c, HeatingControlService s, PanelSnapshotService snap) => Write(c, snap, () =>
+        group.MapPost("/heating/off", (HttpContext c, HeatingControlService s, PanelSnapshotService snap, BoilerNotifier notifier) => Write(c, snap, () =>
         {
             s.SetBoiler(false);
+            _ = notifier.NotifyAsync(false);
             return Task.CompletedTask;
         }, "Caldaia spenta"));
         group.MapPut("/heating/program", (PanelProgramBody body, HttpContext c, HeatingControlService s, PanelSnapshotService snap) =>

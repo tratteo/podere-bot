@@ -16,7 +16,8 @@ internal class HeatingCommand(
     IConfiguration configuration,
     HeatingDriver heatingDriver,
     Database db,
-    UserDirectory users
+    UserDirectory users,
+    BoilerNotifier notifier
 ) : Command(logger, configuration, users)
 {
     private readonly System.Timers.Timer refreshTimer = new(TimeSpan.FromSeconds(10));
@@ -171,6 +172,10 @@ internal class HeatingCommand(
         catch (Exception) { }
     }
 
+    /// <summary>Inside an active, unsuspended interval the program owns the boiler.</summary>
+    private bool ProgramOwnsBoiler() =>
+        db.Data.HeatingProgram is { IsSuspended: false } program && program.GetCurrentInterval() != null;
+
     protected override async Task OnCallback(Update update, string callbackData)
     {
         var currentInterval = db.Data.HeatingProgram?.GetCurrentInterval();
@@ -207,8 +212,17 @@ internal class HeatingCommand(
         }
         else if (callbackData == "off")
         {
+            if (ProgramOwnsBoiler())
+            {
+                await Arguments.Client.AnswerCallbackQuery(
+                    update.CallbackQuery!.Id,
+                    "Programma in corso: la caldaia è gestita dal programma."
+                );
+                return;
+            }
             heatingDriver.SwitchHeating(false);
             db.Edit(d => d.ManualHeatingActive = false);
+            _ = notifier.NotifyAsync(false);
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
                 $"""
@@ -220,8 +234,17 @@ internal class HeatingCommand(
         }
         else if (callbackData == "on")
         {
+            if (ProgramOwnsBoiler())
+            {
+                await Arguments.Client.AnswerCallbackQuery(
+                    update.CallbackQuery!.Id,
+                    "Programma in corso: la caldaia è gestita dal programma."
+                );
+                return;
+            }
             heatingDriver.SwitchHeating(true);
             db.Edit(d => d.ManualHeatingActive = true);
+            _ = notifier.NotifyAsync(true);
             await Arguments.Client.SendMessage(
                 Arguments.Message.Chat.Id,
                 $"""

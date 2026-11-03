@@ -10,6 +10,7 @@ internal sealed class HeatingMonitorDaemon(
     HeatingDriver heatingDriver,
     ITemperatureDriver temperatureDriver,
     BotHostedService bot,
+    BoilerNotifier notifier,
     StartupGate startup,
     ILogger<HeatingMonitorDaemon> logger
 ) : BackgroundService
@@ -82,14 +83,14 @@ internal sealed class HeatingMonitorDaemon(
             {
                 boilerOnSinceUtc = DateTime.UtcNow;
                 boilerStuckNotified = false;
-                if (startup.Ready && !suppress)
+                if (startup.Ready && !suppress && !notifier.WasJustNotified(true))
                     await bot.NotifyTopicAsync(NotificationTopic.Heating, "🔥 <b>Caldaia accesa</b>.");
             }
             else
             {
                 boilerOnSinceUtc = null;
                 boilerStuckNotified = false;
-                if (startup.Ready && !suppress)
+                if (startup.Ready && !suppress && !notifier.WasJustNotified(false))
                     await bot.NotifyTopicAsync(NotificationTopic.Heating, "❄️ <b>Caldaia spenta</b>.");
             }
         }

@@ -63,6 +63,7 @@ builder.Services.AddSingleton<PanelStore>();
 builder.Services.AddSingleton<NotificationLog>();
 builder.Services.AddSingleton<PanelDeviceService>();
 builder.Services.AddSingleton<HeatingControlService>();
+builder.Services.AddSingleton<BoilerNotifier>();
 builder.Services.AddSingleton<GateControlService>();
 builder.Services.AddSingleton<HeatingStatusService>();
 builder.Services.AddSingleton<AdminScopeNotifier>();

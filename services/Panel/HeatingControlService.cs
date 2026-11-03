@@ -21,6 +21,11 @@ internal sealed class HeatingControlService(HeatingDriver driver, Database db, I
 
     public void SetBoiler(bool on)
     {
+        // The program owns the boiler while an interval runs: manual control would be undone
+        // within one poll and the panel would lie about the state.
+        if (db.Data.HeatingProgram is { IsSuspended: false } program && program.GetCurrentInterval() != null)
+            throw new PanelValidationException("Programma in corso: la caldaia è gestita dal programma.");
+
         driver.SwitchHeating(on);
         db.Edit(d => d.ManualHeatingActive = on);
         logger.LogInformation("boiler switched {s} from the panel", on ? "on" : "off");

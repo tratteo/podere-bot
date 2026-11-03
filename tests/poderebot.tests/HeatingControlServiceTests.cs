@@ -90,6 +90,27 @@ public sealed class HeatingControlServiceTests : IDisposable
         Assert.Null(db.Data.HeatingProgram);
     }
 
+    [Fact]
+    public void ManualBoilerSwitchIsRefusedInsideAnActiveInterval()
+    {
+        service.SetProgram([new HeatingIntervalInput(0, 0, 23, 59, 20)]);
+
+        var error = Assert.Throws<PanelValidationException>(() => service.SetBoiler(true));
+        Assert.Contains("Programma in corso", error.Message);
+        Assert.False(db.Data.ManualHeatingActive);
+    }
+
+    [Fact]
+    public void ManualBoilerSwitchWorksWhenTheProgramIsSuspended()
+    {
+        service.SetProgram([new HeatingIntervalInput(0, 0, 23, 59, 20)]);
+        service.SetSuspended(true);
+
+        service.SetBoiler(true);
+
+        Assert.True(db.Data.ManualHeatingActive);
+    }
+
     private sealed class TestEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
     {
         public string EnvironmentName { get; set; } = "Test";

@@ -71,13 +71,22 @@ internal class TemperaturesCommand(
         var sb = new StringBuilder();
         sb.AppendLine(probe.Status == LocalTemperatureStatus.Ok ? "🟢 <b>Temperature</b>" : "🔴 <b>Temperature</b>");
         sb.AppendLine();
-        sb.AppendLine($"<pre>{BuildReadingsBlock(probe, externals)}</pre>");
+        sb.AppendLine($"🏠 <b>Host</b> · {FormatTemperature(probe.Temperature)}");
+        if (externals.Count == 0)
+            sb.AppendLine("📡 <i>Nessun sensore esterno.</i>");
+        foreach (var reading in externals)
+        {
+            var age = FormatAge(DateTime.UtcNow - reading.Timestamp);
+            sb.AppendLine($"📡 <b>{Escape(reading.Location)}</b> · {FormatTemperature(reading.Temperature)} <i>({age})</i>");
+        }
 
         if (probe.Status != LocalTemperatureStatus.Ok)
         {
             sb.AppendLine();
             sb.AppendLine("⚠️ <b>Sensore host non disponibile</b>");
-            sb.AppendLine($"<pre>{BuildDiagnosticsBlock(probe)}</pre>");
+            foreach (var (label, value) in BuildDiagnosticsRows(probe))
+                sb.AppendLine($"• {label} · {value}");
+            sb.AppendLine();
             sb.AppendLine($"<i>{Describe(probe)}</i>");
             if (!string.IsNullOrWhiteSpace(probe.Error))
                 sb.AppendLine($"<i>{Escape(probe.Error)}</i>");
@@ -88,52 +97,15 @@ internal class TemperaturesCommand(
         return sb.ToString();
     }
 
-    private static string BuildReadingsBlock(LocalTemperatureProbe probe, List<TemperatureReading> externals)
-    {
-        var rows = new List<(string Label, string Value, string Age)> { ("Host", FormatTemperature(probe.Temperature), "") };
-        foreach (var reading in externals)
-        {
-            var age = FormatAge(DateTime.UtcNow - reading.Timestamp);
-            rows.Add((Escape(reading.Location), FormatTemperature(reading.Temperature), age));
-        }
-
-        var labelWidth = rows.Max(r => r.Label.Length);
-        var valueWidth = rows.Max(r => r.Value.Length);
-
-        var sb = new StringBuilder();
-        foreach (var (label, value, age) in rows)
-        {
-            if (sb.Length > 0)
-                sb.Append('\n');
-            sb.Append(label.PadRight(labelWidth)).Append("  ").Append(value.PadRight(valueWidth));
-            if (!string.IsNullOrEmpty(age))
-                sb.Append("  ").Append(age);
-        }
-        return sb.ToString();
-    }
-
-    private static string BuildDiagnosticsBlock(LocalTemperatureProbe probe)
-    {
-        var rows = new List<(string Label, string Value)>
-        {
-            ("Bus 1-Wire", DescribeBus(probe)),
-            ("Sensori", probe.Sensors.Count.ToString("0", Culture)),
-            ("Overlay", DescribeOverlay(probe.OverlayConfigured)),
-            ("Ultima OK", probe.LastSuccessUtc.HasValue ? probe.LastSuccessUtc.Humanize() : "mai"),
-            ("Tentativi", probe.ConsecutiveFailures.ToString("0", Culture)),
-            ("Causa", DescribeCause(probe)),
-        };
-
-        var width = rows.Max(r => r.Label.Length);
-        var sb = new StringBuilder();
-        foreach (var (label, value) in rows)
-        {
-            if (sb.Length > 0)
-                sb.Append('\n');
-            sb.Append(label.PadRight(width)).Append("  ").Append(value);
-        }
-        return sb.ToString();
-    }
+    private static List<(string Label, string Value)> BuildDiagnosticsRows(LocalTemperatureProbe probe) =>
+    [
+        ("Bus 1-Wire", DescribeBus(probe)),
+        ("Sensori", probe.Sensors.Count.ToString("0", Culture)),
+        ("Overlay", DescribeOverlay(probe.OverlayConfigured)),
+        ("Ultima OK", probe.LastSuccessUtc.HasValue ? probe.LastSuccessUtc.Humanize() : "mai"),
+        ("Tentativi", probe.ConsecutiveFailures.ToString("0", Culture)),
+        ("Causa", DescribeCause(probe)),
+    ];
 
     private static string DescribeBus(LocalTemperatureProbe probe)
     {

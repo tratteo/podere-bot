@@ -894,6 +894,8 @@ function renderHeating() {
   const h = heating();
   const on = boilerOn();
   const af = antifreezeActive();
+  const interval = currentInterval();
+  const locked = !!interval && !h.program.suspended;
   const afText = !h.antifreezeEnabled
     ? 'Antigelo disattivato'
     : af
@@ -907,9 +909,10 @@ function renderHeating() {
         <div class="head"><span class="title">Caldaia</span></div>
         ${boilerLine()}
         <div class="seg full strong xl" role="group" aria-label="Caldaia">
-          <button class="${on ? 'on' : ''}" data-action="boiler" data-on="1" aria-pressed="${on}">Accesa</button>
-          <button class="${on ? '' : 'on'}" data-action="boiler" data-on="0" aria-pressed="${!on}">Spenta</button>
+          <button class="${on ? 'on' : ''}" data-action="boiler" data-on="1" aria-pressed="${on}" ${locked ? 'disabled' : ''}>Accesa</button>
+          <button class="${on ? '' : 'on'}" data-action="boiler" data-on="0" aria-pressed="${!on}" ${locked ? 'disabled' : ''}>Spenta</button>
         </div>
+        ${locked ? `<div class="cap">Programma in corso (${minutesToTime(interval.from)}–${minutesToTime(interval.to)}) · caldaia gestita automaticamente</div>` : ''}
         <button class="btn g" data-action="toggle-suspend" ${h.program.hasProgram ? '' : 'disabled'}>${icon(h.program.suspended ? 'play' : 'pause')}${h.program.suspended ? 'Riprendi programma' : 'Sospendi programma'}</button>
         <div class="af ${af ? 'on' : ''}">${icon('snow')}<span>${afText}</span></div>
       </section>
@@ -1449,6 +1452,11 @@ function openMore() {
 async function setBoiler(on) {
   const h = heating();
   if (!h || on === boilerOn()) return;
+  const interval = currentInterval();
+  if (interval && !h.program.suspended) {
+    toast('Programma in corso: la caldaia è gestita dal programma', 'error');
+    return;
+  }
   await optimistic({
     pending: on ? 'Accendo la caldaia…' : 'Spengo la caldaia…',
     apply: () => {
