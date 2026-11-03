@@ -530,6 +530,8 @@ After=network-online.target
 
 [Service]
 Type=simple
+User=$user
+Group=$user
 WorkingDirectory=$ROOT
 ExecStart="$ROOT/run.sh"
 Restart=always
@@ -660,6 +662,22 @@ EOF
 
 setup_units
 rm -f "$ROOT/patch.sh"
+
+# Runtime files created by a previous root run must belong to the service user.
+for runtime_file in db.json users.json usage.json panel.db panel.db-wal panel.db-shm; do
+    if [ -e "$ROOT/$runtime_file" ]; then
+        chown "$user":"$user" "$ROOT/$runtime_file"
+    fi
+done
+
+# A changed unit needs a restart even when the build is already current.
+if [ "$MODE" = auto ] && [ -n "$build_sha" ] && [ "$build_sha" = "$target_sha" ]; then
+    echo - restarting the service for the updated units
+    systemctl restart poderebot.service
+    write_state "updated" "$build_sha" "$target_sha" "units reinstalled"
+    exit 0
+fi
+
 if [ "$MODE" = auto ]; then
     update_args=(--no-lock)
 else
