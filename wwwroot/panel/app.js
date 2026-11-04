@@ -89,6 +89,10 @@ function savePref(key, value) {
   } catch (e) {
     /* private mode: the choice lasts for this session */
   }
+  if (key === 'theme') {
+    // A kiosk browser may clear the storage on reload; the cookie keeps the choice.
+    document.cookie = 'pb_theme=' + value + ';path=/;max-age=31536000;SameSite=Strict';
+  }
 }
 
 /* ---------- state ---------- */

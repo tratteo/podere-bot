@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0a0b0b">
+<meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PodereBot">
@@ -16,7 +17,20 @@
   (function () {
     var root = document.documentElement;
     try {
-      var theme = localStorage.getItem('pb.theme') || 'auto';
+      var stored = localStorage.getItem('pb.theme');
+      if (!stored) {
+        // Browsers that clear the storage (a kiosk that reloads the page) still keep the cookie.
+        var match = document.cookie.match(/(?:^|; )pb_theme=(auto|dark|light)/);
+        if (match) {
+          stored = match[1];
+          try {
+            localStorage.setItem('pb.theme', stored);
+          } catch (e) {
+            /* storage disabled, the cookie is enough */
+          }
+        }
+      }
+      var theme = stored || 'auto';
       var dark = theme === 'auto' ? matchMedia('(prefers-color-scheme: dark)').matches : theme === 'dark';
       root.dataset.theme = dark ? 'dark' : 'light';
       if (localStorage.getItem('pb.motion') === 'calm') root.classList.add('calm');
@@ -25,7 +39,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="styles.css?v=24">
+<link rel="stylesheet" href="styles.css?v=25">
 </head>
 <body>
 
@@ -140,6 +154,6 @@
 <div class="toast" id="toast" role="status" aria-live="polite" hidden><svg class="icon" id="toast-icon"><use href="#i-check"></use></svg><span id="toast-text"></span></div>
 
 <script src="config.js"></script>
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>
