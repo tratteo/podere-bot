@@ -21,6 +21,10 @@ internal sealed class PanelDeviceService(
 {
     public const string CookieName = "poderebot_panel";
 
+    // A paired panel polls every few seconds: rewriting the stamp on every request would keep the
+    // SQLite write-ahead log busy and wear the SD card. Five minutes is enough for the device list.
+    private const long SeenIntervalSeconds = 300;
+
     private readonly PanelOptions options = OptionsReader.ReadPanel(configuration);
 
     public PanelOptions Options => options;
@@ -262,9 +266,12 @@ internal sealed class PanelDeviceService(
         {
             using var connection = store.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE panel_devices SET last_seen_at = $now WHERE id = $id;";
+            command.CommandText =
+                "UPDATE panel_devices SET last_seen_at = $now "
+                + "WHERE id = $id AND (last_seen_at IS NULL OR last_seen_at < $now - $interval);";
             command.Parameters.AddWithValue("$id", id);
             command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            command.Parameters.AddWithValue("$interval", SeenIntervalSeconds);
             command.ExecuteNonQuery();
         }
         catch (Exception ex)
