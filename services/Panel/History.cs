@@ -6,13 +6,17 @@ internal sealed record HistorySeriesPoint(DateTime At, double Value);
 
 internal sealed record HistorySeries(string Id, string Label, IReadOnlyList<HistorySeriesPoint> Points);
 
+/// <summary>Seconds the boiler ran inside one bucket, hour or day.</summary>
+internal sealed record HistoryBoilerPoint(DateTime At, double Seconds);
+
 internal sealed record HistoryResult(
     string Range,
     string Bucket,
     DateTime From,
     DateTime To,
     IReadOnlyList<HistoryPoint> Points,
-    IReadOnlyList<HistorySeries> Series
+    IReadOnlyList<HistorySeries> Series,
+    IReadOnlyList<HistoryBoilerPoint> Boiler
 );
 
 /// <summary>
@@ -63,11 +67,21 @@ internal static class TemperatureHistory
         DateTime fromLocal,
         DateTime toLocal,
         TimeZoneInfo? zone = null
-    ) => Build(rows, [], range, fromLocal, toLocal, zone);
+    ) => Build(rows, [], [], range, fromLocal, toLocal, zone);
 
     public static HistoryResult Build(
         IEnumerable<TemperatureBucket> rows,
         IEnumerable<SensorBucket> sensors,
+        string range,
+        DateTime fromLocal,
+        DateTime toLocal,
+        TimeZoneInfo? zone = null
+    ) => Build(rows, sensors, [], range, fromLocal, toLocal, zone);
+
+    public static HistoryResult Build(
+        IEnumerable<TemperatureBucket> rows,
+        IEnumerable<SensorBucket> sensors,
+        IEnumerable<BoilerBucket> boiler,
         string range,
         DateTime fromLocal,
         DateTime toLocal,
@@ -80,8 +94,9 @@ internal static class TemperatureHistory
             ? BuildHourly(rows, zone)
             : BuildDaily(rows, zone);
         var series = hourly ? BuildSeriesHourly(sensors, zone) : BuildSeriesDaily(sensors, zone);
+        var runtime = hourly ? BuildBoilerHourly(boiler, zone) : BuildBoilerDaily(boiler, zone);
 
-        return new HistoryResult(range, hourly ? "hour" : "day", fromLocal, toLocal, points, series);
+        return new HistoryResult(range, hourly ? "hour" : "day", fromLocal, toLocal, points, series, runtime);
     }
 
     private static List<HistoryPoint> BuildHourly(IEnumerable<TemperatureBucket> rows, TimeZoneInfo zone) =>
@@ -158,6 +173,21 @@ internal static class TemperatureHistory
     private static List<HistorySeries> Order(IEnumerable<HistorySeries> series) =>
         series.OrderBy(s => s.Id == "local" ? 0 : 1)
             .ThenBy(s => s.Label, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+    private static List<HistoryBoilerPoint> BuildBoilerHourly(IEnumerable<BoilerBucket> rows, TimeZoneInfo zone) =>
+        rows.OrderBy(r => r.HourUtc)
+            .Select(r =>
+                new HistoryBoilerPoint(TimeZoneInfo.ConvertTimeFromUtc(r.AtUtc, zone), Math.Round(r.Seconds))
+            )
+            .ToList();
+
+    private static List<HistoryBoilerPoint> BuildBoilerDaily(IEnumerable<BoilerBucket> rows, TimeZoneInfo zone) =>
+        rows.GroupBy(r => TimeZoneInfo.ConvertTimeFromUtc(r.AtUtc, zone).Date)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+                new HistoryBoilerPoint(DateTime.SpecifyKind(g.Key, DateTimeKind.Unspecified), Math.Round(g.Sum(r => r.Seconds)))
+            )
             .ToList();
 
     private static double Round(double value) => Math.Round(value, 1, MidpointRounding.AwayFromZero);

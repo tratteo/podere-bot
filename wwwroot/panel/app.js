@@ -954,6 +954,91 @@ function renderHome() {
   </div>`;
 }
 
+function fmtDuration(seconds) {
+  const value = Math.max(0, seconds || 0);
+  const minutes = Math.round(value / 60);
+  if (minutes <= 0) return value > 0 ? '<1 min' : '0 min';
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? `${hours} h ${String(rest).padStart(2, '0')} min` : `${rest} min`;
+}
+
+let barHover = null;
+let barHoverTimer = null;
+
+function boilerChart() {
+  const data = state.history;
+  if (!data || data.error) return '';
+  const points = Array.isArray(data.boiler) ? data.boiler : [];
+  if (!points.length) {
+    return `<section class="card rise" style="--i:5">
+      <div class="head"><span class="title">Riscaldamento acceso</span></div>
+      <div class="empty">${icon('flame')}<span>Nessuna accensione in questo periodo.</span></div>
+    </section>`;
+  }
+  const day = data.bucket === 'day';
+  // One slot per bucket of the range, so the bars sit on the same time axis as the chart above.
+  const slots = (data.points || []).length ? data.points.map((p) => new Date(p.at)) : points.map((p) => new Date(p.at));
+  const byAt = new Map(points.map((p) => [new Date(p.at).getTime(), p.seconds]));
+  const values = slots.map((at) => byAt.get(at.getTime()) || 0);
+  if (!values.some((v) => v > 0)) {
+    barHover = null;
+    return `<section class="card rise" style="--i:5">
+      <div class="head"><span class="title">Riscaldamento acceso</span><span class="badge">0 min</span></div>
+      <div class="empty">${icon('flame')}<span>Nessuna accensione in questo periodo.</span></div>
+    </section>`;
+  }
+  barHover = { day, points: slots.map((at, i) => ({ at, seconds: values[i] })) };
+  const max = Math.max(...values, 1);
+  const total = values.reduce((sum, v) => sum + v, 0);
+  const peak = Math.max(...values);
+  const bars = values
+    .map((value, i) => `<i class="bcol" style="height:${Math.max(1.2, (value / max) * 100).toFixed(2)}%" data-i="${i}"></i>`)
+    .join('');
+  return `<section class="card rise" style="--i:5">
+    <div class="head"><span class="title">Riscaldamento acceso</span><span class="badge">${esc(fmtDuration(total))}</span></div>
+    <div class="bars-wrap">
+      <div class="bars${values.length > 40 ? ' dense' : ''}" role="img" aria-label="Tempo di caldaia accesa">${bars}</div>
+      <div class="bars-tip" hidden></div>
+    </div>
+    <div class="bars-foot"><span>Ogni barra è ${day ? 'un giorno' : "un'ora"}</span><span>Picco ${esc(fmtDuration(peak))}</span></div>
+  </section>`;
+}
+
+function showBarHover(event) {
+  if (!barHover) return;
+  const wrap = event.target.closest('.bars-wrap');
+  if (!wrap) return;
+  const plot = wrap.querySelector('.bars');
+  const bars = plot.querySelectorAll('.bcol');
+  const rect = plot.getBoundingClientRect();
+  if (!rect.width || !bars.length) return;
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  const index = Math.min(bars.length - 1, Math.floor(ratio * bars.length));
+  const point = barHover.points[index];
+  if (!point) return;
+  bars.forEach((bar, i) => bar.classList.toggle('on', i === index));
+  const tip = wrap.querySelector('.bars-tip');
+  const label = barHover.day ? fmtDate(point.at) : fmtTime(point.at);
+  tip.innerHTML = `<span>${esc(label)}</span><b>${esc(fmtDuration(point.seconds))}</b>`;
+  tip.hidden = false;
+  const center = ((index + 0.5) / bars.length) * rect.width;
+  const width = tip.offsetWidth;
+  tip.style.left = `${Math.max(0, Math.min(rect.width - width, center - width / 2))}px`;
+}
+
+function hideBarHover(delay = 0) {
+  clearTimeout(barHoverTimer);
+  const run = () => {
+    document.querySelectorAll('.bars .bcol.on').forEach((bar) => bar.classList.remove('on'));
+    document.querySelectorAll('.bars-tip').forEach((tip) => {
+      tip.hidden = true;
+    });
+  };
+  if (delay) barHoverTimer = setTimeout(run, delay);
+  else run();
+}
+
 function renderHeating() {
   const h = heating();
   const on = boilerOn();
@@ -992,6 +1077,7 @@ function renderHeating() {
       <div class="head" style="flex-wrap:wrap"><span class="title">Andamento</span><div class="chart-tools">${seg('chart-range', RANGES, state.historyRange, 'sm')}${seriesPicker()}<button class="btn s g square" data-action="chart-full" aria-label="${state.chartFull ? 'Chiudi lo schermo intero' : 'Grafico a schermo intero'}" title="${state.chartFull ? 'Chiudi' : 'Schermo intero'}">${icon(state.chartFull ? 'x' : 'screen')}</button></div></div>
       <div id="chart-body">${temperatureChart()}</div>
     </section>
+    ${boilerChart()}
   </div>`;
 }
 
@@ -2694,6 +2780,22 @@ document.addEventListener('pointercancel', (event) => {
 document.addEventListener('pointerout', (event) => {
   if (chartDrag || Date.now() < chartLingerUntil) return;
   if (!event.relatedTarget) hideChartHover();
+});
+
+document.addEventListener('pointermove', (event) => {
+  if (event.target.closest('.bars-wrap')) showBarHover(event);
+  else hideBarHover();
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (event.target.closest('.bars-wrap')) {
+    clearTimeout(barHoverTimer);
+    showBarHover(event);
+  }
+});
+
+document.addEventListener('pointerup', (event) => {
+  if (event.pointerType === 'touch' && document.querySelector('.bars-tip:not([hidden])')) hideBarHover(2500);
 });
 
 document.addEventListener('click', (event) => {

@@ -189,9 +189,11 @@ internal class PanelApi : IEndpoint
             var (start, end) = TemperatureHistory.Resolve(range, ParseLocal(from), ParseLocal(to), DateTime.Now);
             var rows = store.Hourly(start.ToUniversalTime(), end.ToUniversalTime().AddSeconds(1));
             var sensors = store.SensorHourly(start.ToUniversalTime(), end.ToUniversalTime().AddSeconds(1));
+            var boiler = store.BoilerHourly(start.ToUniversalTime(), end.ToUniversalTime().AddSeconds(1));
             var result = TemperatureHistory.Build(
                 rows,
                 sensors,
+                boiler,
                 string.IsNullOrWhiteSpace(range) ? "today" : range!,
                 start,
                 end

@@ -34,6 +34,31 @@ public sealed class PanelStoreTests : IDisposable
     }
 
     [Fact]
+    public void BoilerSpanIsSplitOnTheHourAndAccumulated()
+    {
+        var from = new DateTime(2026, 3, 4, 10, 59, 30, DateTimeKind.Utc);
+        store.AddBoilerSpan(from, from.AddMinutes(1));
+        store.AddBoilerSpan(from, from.AddSeconds(30));
+
+        var rows = store.BoilerHourly(from.AddHours(-1), from.AddHours(2));
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(60, rows[0].Seconds, 3);
+        Assert.Equal(30, rows[1].Seconds, 3);
+    }
+
+    [Fact]
+    public void BoilerSpanIgnoresAnAbsurdClockJump()
+    {
+        var to = new DateTime(2026, 3, 4, 12, 0, 0, DateTimeKind.Utc);
+        store.AddBoilerSpan(to.AddDays(-3), to);
+
+        var rows = store.BoilerHourly(to.AddDays(-4), to.AddHours(1));
+
+        Assert.True(rows.Sum(r => r.Seconds) <= 26 * 3600 + 1);
+    }
+
+    [Fact]
     public void UpsertFoldsAverageMinMaxAndSamples()
     {
         var at = new DateTime(2026, 3, 4, 10, 5, 0, DateTimeKind.Utc);

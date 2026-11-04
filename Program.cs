@@ -77,6 +77,7 @@ builder.Services.AddHostedService<HeatingProgramDaemon>();
 builder.Services.AddHostedService<HeatingMonitorDaemon>();
 builder.Services.AddHostedService<GateAccessExpiryDaemon>();
 builder.Services.AddHostedService<TemperatureHistoryRecorder>();
+builder.Services.AddHostedService<BoilerRuntimeRecorder>();
 
 builder.Services.AddSingleton<BotHostedService>();
 builder.Services.AddHostedService(p => p.GetRequiredService<BotHostedService>());

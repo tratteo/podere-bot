@@ -1832,6 +1832,81 @@ button {
   }
 }
 
+/* Boiler runtime: one bar per bucket, monochrome, no chrome around the data. */
+.bars-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 132px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bars.dense {
+  gap: 1px;
+}
+
+.bcol {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 3px 3px 0 0;
+  background: var(--text);
+  opacity: 0.2;
+  transition: opacity 0.18s ease;
+}
+
+.bcol.on {
+  opacity: 0.85;
+}
+
+.calm .bcol {
+  transition: none;
+}
+
+.bars-tip {
+  position: absolute;
+  top: -4px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.bars-tip[hidden] {
+  display: none;
+}
+
+.bars-tip span {
+  color: var(--muted);
+}
+
+.bars-tip b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.bars-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
 /* Full screen: the card takes the viewport and the plot the height that is left. The rail is
    hidden because the card is painted inside the main column stacking context. */
 body.chart-full {

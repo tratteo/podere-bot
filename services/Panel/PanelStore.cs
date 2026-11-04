@@ -15,6 +15,12 @@ internal sealed record SensorBucket(string Id, string Label, long HourUtc, doubl
     public DateTime AtUtc => DateTimeOffset.FromUnixTimeSeconds(HourUtc).UtcDateTime;
 }
 
+/// <summary>Seconds the boiler ran inside one UTC hour, manual switches included.</summary>
+internal sealed record BoilerBucket(long HourUtc, double Seconds)
+{
+    public DateTime AtUtc => DateTimeOffset.FromUnixTimeSeconds(HourUtc).UtcDateTime;
+}
+
 internal sealed record PanelEvent(long Id, string Topic, string Title, string? Detail, DateTime At);
 
 /// <summary>
@@ -99,6 +105,10 @@ internal sealed class PanelStore
                         PRIMARY KEY (hour_utc, sensor_id)
                     );
                     CREATE INDEX IF NOT EXISTS sensor_hourly_id ON sensor_hourly(sensor_id, hour_utc);
+                    CREATE TABLE IF NOT EXISTS boiler_hourly (
+                        hour_utc INTEGER PRIMARY KEY,
+                        seconds REAL NOT NULL
+                    );
                     CREATE TABLE IF NOT EXISTS events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         topic TEXT NOT NULL,
@@ -211,6 +221,97 @@ internal sealed class PanelStore
         {
             logger.LogWarning("unable to record sensor samples: {m}", ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Adds a boiler running span to the hourly buckets, split on the UTC hour boundaries so a
+    /// period that crosses midnight, or a delayed sample, still lands on the right hours.
+    /// </summary>
+    public void AddBoilerSpan(DateTime fromUtc, DateTime toUtc)
+    {
+        if (!Available)
+            return;
+
+        fromUtc = fromUtc.ToUniversalTime();
+        toUtc = toUtc.ToUniversalTime();
+        // A clock jump or a very stale sample must not invent a day of heating at once.
+        if ((toUtc - fromUtc).TotalHours > 26)
+            fromUtc = toUtc.AddHours(-26);
+        if (toUtc <= fromUtc)
+            return;
+
+        var rows = new List<(long Hour, double Seconds)>();
+        var hour = new DateTime(fromUtc.Year, fromUtc.Month, fromUtc.Day, fromUtc.Hour, 0, 0, DateTimeKind.Utc);
+        while (hour < toUtc)
+        {
+            var start = hour > fromUtc ? hour : fromUtc;
+            var next = hour.AddHours(1);
+            var end = next < toUtc ? next : toUtc;
+            var seconds = (end - start).TotalSeconds;
+            if (seconds > 0)
+                rows.Add((new DateTimeOffset(hour).ToUnixTimeSeconds(), seconds));
+            hour = next;
+        }
+
+        try
+        {
+            lock (sync)
+            {
+                using var connection = Open();
+                using var transaction = connection.BeginTransaction();
+                using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = """
+                    INSERT INTO boiler_hourly(hour_utc, seconds)
+                    VALUES($h, $s)
+                    ON CONFLICT(hour_utc) DO UPDATE SET seconds = seconds + excluded.seconds;
+                    """;
+                foreach (var (bucket, seconds) in rows)
+                {
+                    command.Parameters.Clear();
+                    command.Parameters.AddWithValue("$h", bucket);
+                    command.Parameters.AddWithValue("$s", seconds);
+                    command.ExecuteNonQuery();
+                }
+                transaction.Commit();
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("unable to record boiler runtime: {m}", ex.Message);
+        }
+    }
+
+    public IReadOnlyList<BoilerBucket> BoilerHourly(DateTime fromUtc, DateTime toUtc)
+    {
+        var result = new List<BoilerBucket>();
+        if (!Available)
+            return result;
+
+        try
+        {
+            lock (sync)
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT hour_utc, seconds
+                    FROM boiler_hourly
+                    WHERE hour_utc >= $from AND hour_utc < $to
+                    ORDER BY hour_utc;
+                    """;
+                command.Parameters.AddWithValue("$from", new DateTimeOffset(fromUtc.ToUniversalTime()).ToUnixTimeSeconds());
+                command.Parameters.AddWithValue("$to", new DateTimeOffset(toUtc.ToUniversalTime()).ToUnixTimeSeconds());
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                    result.Add(new BoilerBucket(reader.GetInt64(0), reader.GetDouble(1)));
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("unable to read boiler runtime: {m}", ex.Message);
+        }
+        return result;
     }
 
     public IReadOnlyList<TemperatureBucket> Hourly(DateTime fromUtc, DateTime toUtc)
@@ -378,6 +479,7 @@ internal sealed class PanelStore
                     history.CommandText = """
                     DELETE FROM temperature_hourly WHERE hour_utc < $cutoff;
                     DELETE FROM sensor_hourly WHERE hour_utc < $cutoff;
+                    DELETE FROM boiler_hourly WHERE hour_utc < $cutoff;
                     """;
                     history.Parameters.AddWithValue(
                         "$cutoff",

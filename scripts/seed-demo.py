@@ -25,6 +25,10 @@ db.executescript(
         PRIMARY KEY (hour_utc, sensor_id)
     );
     CREATE INDEX IF NOT EXISTS sensor_hourly_id ON sensor_hourly(sensor_id, hour_utc);
+    CREATE TABLE IF NOT EXISTS boiler_hourly (
+        hour_utc INTEGER PRIMARY KEY,
+        seconds REAL NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         topic TEXT NOT NULL,
@@ -76,6 +80,27 @@ while hour <= now:
     hour += timedelta(hours=1)
     i += 1
 
+# Boiler runtime: a morning and an evening cycle for the last days, one day left empty on
+# purpose so the bar chart shows a real gap.
+boiler_hours = 0
+for day in range(0, 8):
+    start = (now - timedelta(days=day)).replace(hour=0, minute=0, second=0, microsecond=0)
+    if day == 3:
+        continue
+    for offset in range(24):
+        local = start + timedelta(hours=offset)
+        if local > now:
+            break
+        hour_of_day = local.hour
+        if hour_of_day in (6, 7, 8, 18, 19, 20, 21):
+            seconds = 3300 - (offset % 4) * 180
+            ts = int(local.astimezone(timezone.utc).timestamp())
+            db.execute(
+                "INSERT OR REPLACE INTO boiler_hourly(hour_utc, seconds) VALUES(?, ?)",
+                (ts, seconds),
+            )
+            boiler_hours += 1
+
 db.commit()
 db.close()
-print(f"demo panel.db: {i} hourly points, {len(sensors)} sensors")
+print(f"demo panel.db: {i} hourly points, {len(sensors)} sensors, {boiler_hours} boiler hours")
