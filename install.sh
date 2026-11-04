@@ -241,6 +241,23 @@ for _ in $(seq 1 90); do
     sleep 1
 done
 
+# cage needs a connected connector: with no screen wlroots waits ten seconds, fails, and systemd
+# would restart it forever, writing to the journal and to the SD card on every cycle.
+connected=0
+for _ in $(seq 1 60); do
+    for status in /sys/class/drm/card*-*/status; do
+        if [ "$(cat "$status" 2>/dev/null)" = "connected" ]; then
+            connected=1
+            break 2
+        fi
+    done
+    sleep 1
+done
+if [ "$connected" -ne 1 ]; then
+    echo "nessuno schermo collegato: chiosco non avviato"
+    exit 1
+fi
+
 exec cage -- cog -P wl --scale=1 --device-scale=1 --webprocess-failure=restart -b '#0a0e0d' "$URL"
 EOF
 
@@ -608,6 +625,8 @@ EOF
 Description=PodereBot touch panel
 BindsTo=poderebot.service
 After=poderebot.service
+StartLimitIntervalSec=900
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -618,7 +637,7 @@ RuntimeDirectory=poderebot-kiosk
 RuntimeDirectoryMode=0700
 ExecStart=$ROOT/panel.sh
 Restart=always
-RestartSec=3
+RestartSec=30
 Nice=5
 
 [Install]
