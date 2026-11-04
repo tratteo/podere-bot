@@ -111,6 +111,7 @@ const state = {
   lightsUntil: 0,
   boilerPending: null,
   shownTemp: null,
+  chartFull: false,
   lastInput: Date.now(),
   idle: false,
 };
@@ -570,6 +571,7 @@ function render(full = false) {
   renderAura();
   renderIdle();
   tickLive();
+  placePills();
   reapplyChartHover();
 }
 
@@ -601,6 +603,39 @@ function movePill() {
     pill.style.transition = '';
     pill.classList.add('ready');
     pillPlaced = true;
+  }
+}
+
+/* Every segmented control and the bottom tabs get the same sliding pill as the rail: the active
+   background moves instead of jumping, so the eye follows the change. */
+function placePills() {
+  const boxes = [...document.querySelectorAll('.seg'), document.querySelector('.tabs')].filter(Boolean);
+  for (const box of boxes) {
+    const tabs = box.classList.contains('tabs');
+    let pill = box.querySelector(tabs ? '.tab-pill' : '.seg-pill');
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = tabs ? 'tab-pill' : 'seg-pill';
+      pill.setAttribute('aria-hidden', 'true');
+      pill.dataset.fresh = '1';
+      box.prepend(pill);
+    }
+    const active = box.querySelector(tabs ? 'button.active' : 'button.on');
+    if (!active || !active.offsetWidth) {
+      pill.style.opacity = '0';
+      continue;
+    }
+    pill.style.opacity = '1';
+    if (pill.dataset.fresh) {
+      pill.style.transition = 'none';
+      pill.dataset.fresh = '';
+    }
+    pill.style.transform = `translateX(${active.offsetLeft}px)`;
+    pill.style.width = `${active.offsetWidth}px`;
+    if (pill.style.transition === 'none') {
+      void pill.offsetWidth;
+      pill.style.transition = '';
+    }
   }
 }
 
@@ -875,7 +910,7 @@ function eventRow(e) {
 }
 
 function seg(action, options, current, cls = '', extra = '') {
-  return `<div class="seg ${cls}" role="group">${options
+  return `<div class="seg ${cls}" role="group"><span class="seg-pill" aria-hidden="true"></span>${options
     .map(([value, label, ic]) => `<button class="${String(value) === String(current) ? 'on' : ''}" data-action="${action}" data-value="${value}" aria-pressed="${String(value) === String(current)}" ${extra}>${ic ? icon(ic) : ''}${label}</button>`)
     .join('')}</div>`;
 }
@@ -937,7 +972,7 @@ function renderHeating() {
       <section class="card rise" style="--i:2;gap:20px">
         <div class="head"><span class="title">Caldaia</span></div>
         ${boilerLine()}
-        <div class="seg full strong xl" role="group" aria-label="Caldaia">
+        <div class="seg full strong xl" role="group" aria-label="Caldaia"><span class="seg-pill" aria-hidden="true"></span>
           <button class="${on ? 'on' : ''}" data-action="boiler" data-on="1" aria-pressed="${on}" ${locked ? 'disabled' : ''}>Accesa</button>
           <button class="${on ? '' : 'on'}" data-action="boiler" data-on="0" aria-pressed="${!on}" ${locked ? 'disabled' : ''}>Spenta</button>
         </div>
@@ -953,8 +988,8 @@ function renderHeating() {
       </div>
       ${timeline(h.program.intervals, { labels: true, fine: true })}
     </section>
-    <section class="card rise" style="--i:4">
-      <div class="head" style="flex-wrap:wrap"><span class="title">Andamento</span><div class="chart-tools">${seg('chart-range', RANGES, state.historyRange, 'sm')}${seriesPicker()}</div></div>
+    <section class="card chart-card ${state.chartFull ? 'full' : ''} rise" style="--i:4">
+      <div class="head" style="flex-wrap:wrap"><span class="title">Andamento</span><div class="chart-tools">${seg('chart-range', RANGES, state.historyRange, 'sm')}${seriesPicker()}<button class="btn s g square" data-action="chart-full" aria-label="${state.chartFull ? 'Chiudi lo schermo intero' : 'Grafico a schermo intero'}" title="${state.chartFull ? 'Chiudi' : 'Schermo intero'}">${icon(state.chartFull ? 'x' : 'screen')}</button></div></div>
       <div id="chart-body">${temperatureChart()}</div>
     </section>
   </div>`;
@@ -983,7 +1018,7 @@ function windowCard(g) {
     </div>
     <div>
       <div class="k" style="margin-bottom:14px">Durata dello sblocco</div>
-      <div class="seg full tall" role="group">${HOURS.map((h) => `<button class="${open && info.hours === h ? 'on' : ''}" data-action="window" data-hours="${h}" aria-pressed="${open && info.hours === h}">${h} h</button>`).join('')}</div>
+      <div class="seg full tall" role="group"><span class="seg-pill" aria-hidden="true"></span>${HOURS.map((h) => `<button class="${open && info.hours === h ? 'on' : ''}" data-action="window" data-hours="${h}" aria-pressed="${open && info.hours === h}">${h} h</button>`).join('')}</div>
     </div>
   </section>`;
 }
@@ -1053,7 +1088,7 @@ function userDetail(u) {
       </div>
     </div>
     <div class="sec">Ruolo</div>
-    <div class="seg full tall roles" role="group" aria-label="Ruolo">${ROLES.map(
+    <div class="seg full tall roles" role="group" aria-label="Ruolo"><span class="seg-pill" aria-hidden="true"></span>${ROLES.map(
       (r) => `<button class="${role === r.key ? 'on' : ''}" data-action="set-role" data-user="${u.id}" data-role="${r.key}" aria-pressed="${role === r.key}" ${lastAdmin && r.key !== 'admin' ? 'disabled' : ''}>${icon(r.icon, 'r-' + r.key)}${r.label}</button>`
     ).join('')}</div>
     <div class="cap">${meta.desc}</div>
@@ -1407,7 +1442,8 @@ let chartHover = null;
 let chartHoverTimer = null;
 let chartHoverX = null;
 
-function hideChartHover() {
+function hideChartHover(force = false) {
+  if (!force && (chartDrag || Date.now() < chartLingerUntil)) return;
   clearTimeout(chartHoverTimer);
   chartHoverX = null;
   document.querySelectorAll('.chart-cursor, .chart-tip').forEach((el) => {
@@ -1472,6 +1508,16 @@ function showChartHoverAt(plot, clientX) {
   tip.style.top = '8px';
 }
 
+function toggleChartFull() {
+  state.chartFull = !state.chartFull;
+  document.body.classList.toggle('chart-full', state.chartFull);
+  render();
+}
+
+function chartHeight() {
+  return state.chartFull ? Math.max(280, Math.round(window.innerHeight - 212)) : 240;
+}
+
 function temperatureChart() {
   chartHover = null;
   const data = state.history;
@@ -1506,7 +1552,7 @@ function temperatureChart() {
   }
 
   const W = 640;
-  const H = 200;
+  const H = chartHeight();
   const x = (ms) => ((ms - t0) / span) * W;
   const y = (v) => H - ((v - yMin) / (yMax - yMin)) * H;
 
@@ -1562,7 +1608,7 @@ function temperatureChart() {
   const avgMax = drawAvg ? Math.max(...avgPoints.map((p) => p.max)) : null;
   const w = weather();
   const outdoor = state.historyRange === 'today' && w && w.min !== null && w.min !== undefined ? `<span>Esterno <b>${fmt(w.min)}–${fmt(w.max)}°</b></span>` : '';
-  const key = `${data.range}|${data.from}|${data.to}|${avgPoints.length}|${t1}|${state.chartSeries.join(',')}`;
+  const key = `chart|${data.range}|${state.chartSeries.join(',')}`;
   const stats = drawAvg
     ? `<span>Min <b>${fmt(avgMin)}°</b></span><span>Max <b>${fmt(avgMax)}°</b></span><span>Media <b>${fmt(avg)}°</b></span><span>${avgPoints.length} ${data.bucket === 'day' ? 'giorni' : 'ore'}</span>`
     : `<span>${series.length} serie</span>`;
@@ -1590,7 +1636,7 @@ function temperatureChart() {
   chartHover = hoverRef.length ? { t0, span, bucket: data.bucket, ref: hoverRef, series: hoverSeries } : null;
 
   return `<div data-key="${esc(key)}">
-    <div class="chart">
+    <div class="chart" style="--chart-h:${H}px">
       <div class="chart-y">${yLabels}</div>
       <div class="chart-plot">
         <svg class="reveal" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
@@ -1645,6 +1691,16 @@ function tickLive() {
 
 /* ---------- idle screen ---------- */
 
+function idleSensors() {
+  const t = temperatures();
+  const list = [];
+  if (t && t.localStatus === 'Ok' && t.local !== null) list.push(['Locale', t.local]);
+  for (const s of t?.sensors || []) {
+    if (s.fresh && !s.informational && !s.status) list.push([s.location, s.temperature]);
+  }
+  return list;
+}
+
 function renderIdle() {
   const side = $('idle-side');
   if (!state.overview) return;
@@ -1652,9 +1708,33 @@ function renderIdle() {
   const w = weather();
   const info = w ? weatherInfo(w.code, w.isDay) : { icon: 'cloud', label: 'Esterno' };
   const on = boilerOn();
-  const html = `<div class="mini"><span class="sico ${on ? 'a' : ''}">${icon('flame')}</span><div><div class="k">In casa${on ? ' · caldaia accesa' : ''}</div><div class="mono big"><span data-temp>${fmt(state.shownTemp ?? h.temperature)}</span>°</div></div></div>
-    <div class="mini"><span class="sico b">${icon(info.icon)}</span><div><div class="k">Fuori${w ? ' · ' + info.label.toLowerCase() : ''}</div><div class="mono big">${w ? fmt(w.temperature) + '°' : '—'}</div></div></div>`;
+  const g = gates();
+  const interval = currentInterval();
+  const hours = Math.round(((h?.program.intervals || []).reduce((sum, i) => sum + (i.to - i.from), 0)) / 60);
+  const sensors = idleSensors();
+  const open = !!(g && g.open);
+  const gatesText = open && g.expiresAt ? `Aperti fino alle ${fmtTime(new Date(g.expiresAt))}` : open ? 'Aperti' : 'Bloccati';
+  const heatText = interval ? 'Riscaldamento in corso' : hours ? `${hours} h di riscaldamento` : 'Nessun programma';
+  const chips = `<div class="idle-chips">
+      <span class="ichip ${open ? 'g' : ''}">${icon(open ? 'unlock' : 'lock')}${gatesText}</span>
+      <span class="ichip ${on ? 'a' : ''}">${icon('flame')}${on ? 'Caldaia accesa' : 'Caldaia spenta'}</span>
+      <span class="ichip">${icon('clock')}${heatText}</span>
+    </div>`;
+  const sensorRow = sensors.length
+    ? `<div class="idle-sensors"><b>${plural(sensors.length, 'sensore', 'sensori')}</b>${sensors
+        .map(([name, value]) => `<span><i>${esc(name)}</i><b class="mono">${fmt(value)}°</b></span>`)
+        .join('')}</div>`
+    : '';
+  const html = `<div class="mini"><span class="sico ${on ? 'a' : ''}">${icon('flame')}</span><div><div class="k">In casa</div><div class="mono big"><span data-temp>${fmt(state.shownTemp ?? h.temperature)}</span>°</div></div></div>
+    <div class="mini"><span class="sico b">${icon(info.icon)}</span><div><div class="k">Fuori${w ? ' · ' + info.label.toLowerCase() : ''}</div><div class="mono big">${w ? fmt(w.temperature) + '°' : '—'}</div></div></div>
+    ${chips}
+    ${sensorRow}`;
   morph(side, html);
+
+  const badge = $('idle-alert');
+  const count = alerts().length;
+  badge.hidden = count === 0;
+  if (count) badge.innerHTML = `${icon('bell')}<b>${plural(count, 'avviso', 'avvisi')}</b>`;
 }
 
 function showIdle() {
@@ -1753,6 +1833,7 @@ function showSheet() {
   requestAnimationFrame(() => {
     sheet.classList.add('open');
     backdrop.classList.add('open');
+    placePills();
   });
   // Only fields take focus: a focused button would show its ring on a touch screen.
   const focus = sheet.querySelector('input');
@@ -2126,7 +2207,7 @@ function findUser(id) {
 }
 
 function roleSeg(current, action, extra = '') {
-  return `<div class="seg full tall roles" role="group" aria-label="Ruolo">${ROLES.map(
+  return `<div class="seg full tall roles" role="group" aria-label="Ruolo"><span class="seg-pill" aria-hidden="true"></span>${ROLES.map(
     (r) => `<button type="button" class="${current === r.key ? 'on' : ''}" data-action="${action}" data-role="${r.key}" aria-pressed="${current === r.key}" ${extra}>${icon(r.icon, 'r-' + r.key)}${r.label}</button>`
   ).join('')}</div>`;
 }
@@ -2462,6 +2543,10 @@ function setView(name) {
   if (isSheetOpen()) closeSheet();
   const changed = name !== state.view;
   if (changed) state.seriesMenuOpen = false;
+  if (changed && state.chartFull) {
+    state.chartFull = false;
+    document.body.classList.remove('chart-full');
+  }
   state.view = name;
   try {
     if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
@@ -2535,6 +2620,7 @@ const ACTIONS = {
     render();
   },
   'idle-test': () => showIdle(),
+  'chart-full': () => toggleChartFull(),
   'cycle-theme': () => cycleTheme(),
   refresh: async () => {
     await refresh();
@@ -2554,23 +2640,59 @@ const ACTIONS = {
   },
 };
 
-document.addEventListener('pointermove', (event) => {
-  if (event.target.closest('.chart-plot')) updateChartHover(event);
-  else hideChartHover();
-});
+let chartDrag = null;
+let chartLingerUntil = 0;
+
+function chartLinger(delay = 3000) {
+  chartLingerUntil = Date.now() + delay;
+  clearTimeout(chartHoverTimer);
+  chartHoverTimer = setTimeout(() => hideChartHover(true), delay);
+}
 
 document.addEventListener('pointerdown', (event) => {
-  if (event.target.closest('.chart-plot')) {
-    clearTimeout(chartHoverTimer);
-    updateChartHover(event);
+  const plot = event.target.closest('.chart-plot');
+  if (!plot) return;
+  clearTimeout(chartHoverTimer);
+  chartLingerUntil = 0;
+  if (event.pointerType !== 'mouse') {
+    chartDrag = { id: event.pointerId };
+    if (plot.setPointerCapture) {
+      try {
+        plot.setPointerCapture(event.pointerId);
+      } catch (e) {
+        /* the browser may refuse the capture, the drag still works */
+      }
+    }
+  }
+  updateChartHover(event);
+});
+
+document.addEventListener('pointermove', (event) => {
+  if (chartDrag && event.pointerId !== chartDrag.id) return;
+  const plot = event.target.closest('.chart-plot') || (chartDrag ? document.querySelector('.chart-plot') : null);
+  if (plot) {
+    chartLingerUntil = 0;
+    chartHoverX = event.clientX;
+    showChartHoverAt(plot, event.clientX);
+  } else if (!chartDrag) {
+    hideChartHover();
   }
 });
 
 document.addEventListener('pointerup', (event) => {
-  if (event.pointerType === 'touch' && chartHover) chartHoverTimer = setTimeout(hideChartHover, 3000);
+  if (!chartDrag || event.pointerId !== chartDrag.id) return;
+  chartDrag = null;
+  chartLinger(3000);
+});
+
+document.addEventListener('pointercancel', (event) => {
+  if (!chartDrag || event.pointerId !== chartDrag.id) return;
+  chartDrag = null;
+  chartLinger(3000);
 });
 
 document.addEventListener('pointerout', (event) => {
+  if (chartDrag || Date.now() < chartLingerUntil) return;
   if (!event.relatedTarget) hideChartHover();
 });
 
@@ -2602,7 +2724,12 @@ document.addEventListener('click', (event) => {
 $('backdrop').addEventListener('click', closeSheet);
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && isSheetOpen()) closeSheet();
+  if (event.key !== 'Escape') return;
+  if (state.chartFull) {
+    toggleChartFull();
+    return;
+  }
+  if (isSheetOpen()) closeSheet();
 });
 
 /* Any touch wakes the screen; the touch that wakes it never reaches the page below. */
@@ -2631,7 +2758,15 @@ window.addEventListener('hashchange', () => {
   if (VIEWS[name] && name !== state.view) setView(name);
 });
 
-window.addEventListener('resize', movePill);
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  movePill();
+  placePills();
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (state.chartFull) render();
+  }, 180);
+});
 
 if (darkQuery) {
   const onScheme = () => {

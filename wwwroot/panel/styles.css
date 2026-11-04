@@ -1096,6 +1096,7 @@ button {
 /* ---------- segmented control and switch ---------- */
 
 .seg {
+  position: relative;
   display: inline-flex;
   flex: none;
   gap: 5px;
@@ -1106,6 +1107,8 @@ button {
 }
 
 .seg button {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1128,9 +1131,28 @@ button {
 }
 
 .seg button.on {
-  background: var(--seg-on);
+  background: transparent;
   color: var(--text);
+  box-shadow: none;
+}
+
+/* The active background moves between buttons instead of jumping, like the rail. */
+.seg-pill {
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 0;
+  border-radius: 17px;
+  background: var(--seg-on);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), inset 0 0 0 1px var(--border);
+  pointer-events: none;
+  opacity: 0;
+  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), width 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+.seg.sm .seg-pill {
+  border-radius: 13px;
 }
 
 .seg button:disabled {
@@ -1153,8 +1175,13 @@ button {
   padding: 0 10px;
 }
 
-.seg.strong button.on {
+.seg.strong .seg-pill {
   background: var(--pri);
+  box-shadow: none;
+}
+
+.seg.strong button.on {
+  background: transparent;
   color: var(--ink);
   box-shadow: none;
 }
@@ -1725,7 +1752,7 @@ button {
   grid-template-columns: 40px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  min-height: 200px;
+  min-height: var(--chart-h, 240px);
   color: var(--text);
 }
 
@@ -1734,7 +1761,7 @@ button {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 216px;
+  height: calc(var(--chart-h, 240px) + 16px);
   margin-top: -8px;
   line-height: 16px;
   font-variant-numeric: tabular-nums;
@@ -1746,12 +1773,14 @@ button {
 .chart-plot {
   position: relative;
   min-width: 0;
+  /* A horizontal drag moves the cursor; a vertical drag still scrolls the page. */
+  touch-action: pan-y;
 }
 
 .chart-plot svg {
   display: block;
   width: 100%;
-  height: 200px;
+  height: var(--chart-h, 240px);
   overflow: visible;
 }
 
@@ -1801,6 +1830,48 @@ button {
   to {
     opacity: 1;
   }
+}
+
+/* Full screen: the card takes the viewport and the plot the height that is left. The rail is
+   hidden because the card is painted inside the main column stacking context. */
+body.chart-full {
+  overflow: hidden;
+}
+
+body.chart-full .rail,
+body.chart-full .tabs,
+body.chart-full .topbar {
+  visibility: hidden;
+}
+
+.chart-card.full {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 0;
+  padding: 26px 32px 30px;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.chart-card.full .head {
+  flex: none;
+  margin-bottom: 0;
+}
+
+.chart-card.full #chart-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.chart-card.full .chart {
+  height: 100%;
+  min-height: 0;
 }
 
 .chart-cursor {
@@ -1878,7 +1949,7 @@ button {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  min-height: 190px;
+  min-height: 230px;
   color: var(--dim);
   font-size: 16px;
 }
@@ -2605,6 +2676,93 @@ button {
   flex-direction: column;
   gap: 22px;
   padding-bottom: 12px;
+}
+
+.idle-alert {
+  position: absolute;
+  top: 40px;
+  left: 56px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.idle-alert[hidden] {
+  display: none;
+}
+
+.idle-alert .icon {
+  width: 17px;
+  height: 17px;
+}
+
+.idle-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ichip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.ichip .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.ichip.a {
+  color: var(--amber);
+}
+
+.ichip.g {
+  color: var(--green);
+}
+
+.idle-sensors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.idle-sensors > b {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.idle-sensors span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.idle-sensors i {
+  font-style: normal;
+  color: var(--dim);
+}
+
+.idle-sensors .mono {
+  font-size: 17px;
+  color: var(--text);
 }
 
 .idle-side .big {
@@ -3614,8 +3772,25 @@ button {
   }
 
   .tabs button.active {
-    background: var(--card-2);
+    background: transparent;
     color: var(--text);
+  }
+
+  .tab-pill {
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: calc(6px + env(safe-area-inset-bottom));
+    width: 0;
+    border-radius: 16px;
+    background: var(--card-2);
+    pointer-events: none;
+    transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), width 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .tabs button {
+    position: relative;
+    z-index: 1;
   }
 
   .idle-in {
@@ -3628,6 +3803,15 @@ button {
 
   .idle-clock {
     font-size: 120px;
+  }
+
+  .idle-alert {
+    top: 20px;
+    left: 28px;
+  }
+
+  .chart-card.full {
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
   }
 
   /* A 24 hour bar is too narrow for block labels: the section subtitle carries the same detail. */

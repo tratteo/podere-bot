@@ -11,7 +11,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="manifest" href="manifest.json">
-<title>PodereBot · Pannello</title>
+<title>PodereBot Â· Pannello</title>
 <script>
   (function () {
     var root = document.documentElement;
@@ -25,7 +25,7 @@
     }
   })();
 </script>
-<link rel="stylesheet" href="styles.css?v=20">
+<link rel="stylesheet" href="styles.css?v=22">
 </head>
 <body>
 
@@ -90,7 +90,7 @@
       <button class="nav-item" data-view="devices"><svg class="icon"><use href="#i-device"></use></svg><span>Dispositivi</span></button>
       <button class="nav-item" data-view="system"><svg class="icon"><use href="#i-gear"></use></svg><span>Sistema</span></button>
     </nav>
-    <span class="rail-foot" id="rail-version">v—</span>
+    <span class="rail-foot" id="rail-version">vâ€”</span>
   </aside>
 
   <div class="main" id="main">
@@ -99,7 +99,7 @@
       <h1 id="page-title">Casa</h1>
       <div class="top-right">
         <div id="top-action"></div>
-        <button class="chip" id="status-chip" data-action="alerts"><span class="dot"></span><span class="chip-label" id="status-label">Collegamento…</span></button>
+        <button class="chip" id="status-chip" data-action="alerts"><span class="dot"></span><span class="chip-label" id="status-label">Collegamentoâ€¦</span></button>
         <button class="ibtn" id="theme-btn" data-action="cycle-theme" aria-label="Cambia tema"></button>
         <div class="clock" aria-label="Ora locale"><b class="mono" id="clock">--:--</b><span id="clock-date"></span></div>
       </div>
@@ -119,6 +119,7 @@
 <div class="idle" id="idle" aria-hidden="true">
   <div class="aura show" id="idle-aura"><i class="aura-drift"><i class="aura-morph"><b class="aura-core"></b><b class="aura-hl"></b></i></i></div>
   <div class="idle-hint">Tocca per riattivare</div>
+  <div class="idle-alert" id="idle-alert" hidden></div>
   <div class="idle-in">
     <div>
       <div class="mono idle-clock" id="idle-clock">--:--</div>
@@ -139,6 +140,6 @@
 <div class="toast" id="toast" role="status" aria-live="polite" hidden><svg class="icon" id="toast-icon"><use href="#i-check"></use></svg><span id="toast-text"></span></div>
 
 <script src="config.js"></script>
-<script src="app.js?v=20"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>
