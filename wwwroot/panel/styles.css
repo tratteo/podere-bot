@@ -115,6 +115,12 @@
   box-sizing: border-box;
 }
 
+/* The sheet, the toast and the backdrops set their own display, which beats the browser default
+   for [hidden]: an invisible sheet in the middle of the screen would swallow every click there. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -1768,6 +1774,15 @@ button {
   font-size: 12px;
   color: var(--dim);
   text-align: right;
+}
+
+/* A range change dims the chart instead of replacing it, so the card never jumps. */
+.chart-body {
+  transition: opacity 0.18s ease;
+}
+
+.chart-body.is-loading {
+  opacity: 0.45;
 }
 
 .chart-plot {

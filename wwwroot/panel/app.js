@@ -112,6 +112,7 @@ const state = {
   boilerPending: null,
   shownTemp: null,
   chartFull: false,
+  historyLoading: false,
   lastInput: Date.now(),
   idle: false,
 };
@@ -203,6 +204,7 @@ async function loadHistory() {
   } catch (error) {
     state.history = { error: error.message, points: [] };
   }
+  state.historyLoading = false;
   if (state.view === 'heating') render();
 }
 
@@ -1075,7 +1077,7 @@ function renderHeating() {
     </section>
     <section class="card chart-card ${state.chartFull ? 'full' : ''} rise" style="--i:4">
       <div class="head" style="flex-wrap:wrap"><span class="title">Andamento</span><div class="chart-tools">${seg('chart-range', RANGES, state.historyRange, 'sm')}${seriesPicker()}<button class="btn s g square" data-action="chart-full" aria-label="${state.chartFull ? 'Chiudi lo schermo intero' : 'Grafico a schermo intero'}" title="${state.chartFull ? 'Chiudi' : 'Schermo intero'}">${icon(state.chartFull ? 'x' : 'screen')}</button></div></div>
-      <div id="chart-body">${temperatureChart()}</div>
+      <div id="chart-body" class="chart-body${state.historyLoading ? ' is-loading' : ''}">${temperatureChart()}</div>
     </section>
     ${boilerChart()}
   </div>`;
@@ -2178,7 +2180,7 @@ async function applyRange() {
   state.customFrom = from;
   state.customTo = to;
   state.historyRange = 'custom';
-  state.history = null;
+  state.historyLoading = true;
   closeSheet();
   render();
   await loadHistory();
@@ -2191,7 +2193,7 @@ async function changeRange(range) {
   }
   if (range === state.historyRange) return;
   state.historyRange = range;
-  state.history = null;
+  state.historyLoading = true;
   render();
   await loadHistory();
 }
