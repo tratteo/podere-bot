@@ -87,8 +87,7 @@ public sealed class PanelHistoryTests
         var result = TemperatureHistory.Build(rows, "today", from, to, Utc);
 
         Assert.Equal("hour", result.Bucket);
-        Assert.Equal(24, result.Points.Count);
-        var point = Assert.Single(result.Points, p => p.Samples > 0);
+        var point = Assert.Single(result.Points);
         Assert.Equal(20, point.Avg, 3);
         Assert.Equal(10, point.At.Hour);
     }
@@ -109,10 +108,9 @@ public sealed class PanelHistoryTests
         var result = TemperatureHistory.Build(rows, "30d", from, to, Utc);
 
         Assert.Equal("day", result.Bucket);
-        Assert.Equal(11, result.Points.Count);
-        Assert.Equal(2, result.Points.Count(p => p.Samples > 0));
+        Assert.Equal(2, result.Points.Count);
 
-        var first = result.Points.First(p => p.Samples > 0);
+        var first = result.Points[0];
         Assert.Equal(17.5, first.Avg, 3);
         Assert.Equal(8, first.Min, 3);
         Assert.Equal(22, first.Max, 3);
@@ -121,7 +119,7 @@ public sealed class PanelHistoryTests
     }
 
     [Fact]
-    public void BuildKeepsEveryDayOfTheRangeSoGapsStayVisible()
+    public void BuildOmitsEmptyBucketsSoTheChartCutsTheLine()
     {
         var rows = new[]
         {
@@ -133,14 +131,10 @@ public sealed class PanelHistoryTests
 
         var result = TemperatureHistory.Build(rows, "30d", from, to, Utc);
 
-        Assert.Equal(11, result.Points.Count);
-        Assert.Equal(new DateTime(2026, 3, 1, 0, 0, 0), result.Points[0].At);
-        Assert.Equal(new DateTime(2026, 3, 11, 0, 0, 0), result.Points[^1].At);
-        Assert.Equal(0, result.Points[0].Samples);
-        Assert.True(result.Points[1].Samples > 0);
-        Assert.Equal(0, result.Points[2].Samples);
-        Assert.Equal(0, result.Points[6].Samples);
-        Assert.True(result.Points[7].Samples > 0);
+        Assert.Equal(2, result.Points.Count);
+        Assert.Equal(new DateTime(2026, 3, 2, 0, 0, 0), result.Points[0].At);
+        Assert.Equal(new DateTime(2026, 3, 8, 0, 0, 0), result.Points[1].At);
+        Assert.DoesNotContain(result.Points, p => p.Samples == 0);
     }
 
     [Fact]

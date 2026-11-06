@@ -1648,9 +1648,8 @@ function temperatureChart() {
   const t0 = axis.t0;
   const t1 = axis.t1;
   const span = t1 - t0 || 1;
-  // Empty buckets belong to the axis, never to the line.
-  const realPoints = (data.points || []).filter((p) => (p.samples ?? 1) > 0);
-  const avgPoints = realPoints.map((p) => ({ at: new Date(p.at), avg: p.avg, min: p.min, max: p.max }));
+  // The server sends only the buckets that hold samples; the axis comes from the range itself.
+  const avgPoints = (data.points || []).map((p) => ({ at: new Date(p.at), avg: p.avg, min: p.min, max: p.max }));
   const drawAvg = state.chartSeries.includes('avg') && avgPoints.length > 0;
   const series = (data.series || []).filter((s) => state.chartSeries.includes(s.id));
   if (!drawAvg && !series.length) return `<div class="chart-empty">${icon('activity')}<span>Seleziona almeno una serie dal menu.</span></div>`;

@@ -21,9 +21,9 @@ internal sealed record HistoryResult(
 
 /// <summary>
 /// Turns hourly samples into the buckets the chart draws. Hourly up to a week, daily beyond,
-/// grouped by the local calendar so the days follow the Pi time zone and its DST. Every bucket
-/// of the requested range is emitted, empty ones included, so a chart never shrinks to the days
-/// that happen to hold data.
+/// grouped by the local calendar so the days follow the Pi time zone and its DST. The axis spans
+/// the whole requested range, but only the buckets that hold samples carry a temperature: the
+/// line is cut where data is missing instead of dropping to zero.
 /// </summary>
 internal static class TemperatureHistory
 {
@@ -155,6 +155,7 @@ internal static class TemperatureHistory
     private static long BucketKey(long hourUtc, DateTime atUtc, bool hourly, TimeZoneInfo zone) =>
         hourly ? hourUtc : TimeZoneInfo.ConvertTimeFromUtc(atUtc, zone).Date.Ticks;
 
+    /// <summary>Only the buckets that hold samples: an empty one is a cut in the line, never a zero.</summary>
     private static List<HistoryPoint> BuildPoints(
         List<TemperatureBucket> rows,
         List<Bucket> buckets,
@@ -162,29 +163,23 @@ internal static class TemperatureHistory
         TimeZoneInfo zone
     )
     {
-        var byKey = rows.GroupBy(r => BucketKey(r.HourUtc, r.AtUtc, hourly, zone)).ToDictionary(g => g.Key, g => g.ToList());
-        var result = new List<HistoryPoint>(buckets.Count);
-        foreach (var bucket in buckets)
-        {
-            if (!byKey.TryGetValue(bucket.Key, out var group))
+        var at = buckets.ToDictionary(b => b.Key, b => b.At);
+        return rows.GroupBy(r => BucketKey(r.HourUtc, r.AtUtc, hourly, zone))
+            .Where(g => at.ContainsKey(g.Key))
+            .OrderBy(g => g.Key)
+            .Select(g =>
             {
-                result.Add(new HistoryPoint(bucket.At, 0, 0, 0, 0));
-                continue;
-            }
-
-            var samples = group.Sum(r => r.Samples);
-            var weighted = samples > 0 ? group.Sum(r => r.Avg * r.Samples) / samples : group.Average(r => r.Avg);
-            result.Add(
-                new HistoryPoint(
-                    bucket.At,
+                var samples = g.Sum(r => r.Samples);
+                var weighted = samples > 0 ? g.Sum(r => r.Avg * r.Samples) / samples : g.Average(r => r.Avg);
+                return new HistoryPoint(
+                    at[g.Key],
                     Round(weighted),
-                    Round(group.Min(r => r.Min)),
-                    Round(group.Max(r => r.Max)),
+                    Round(g.Min(r => r.Min)),
+                    Round(g.Max(r => r.Max)),
                     samples
-                )
-            );
-        }
-        return result;
+                );
+            })
+            .ToList();
     }
 
     /// <summary>Sensor series stay sparse: a missing reading is a gap, not a value of zero.</summary>
