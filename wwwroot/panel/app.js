@@ -316,6 +316,34 @@ function fmtDate(value) {
   return d ? d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) : '—';
 }
 
+/** The chart spans the requested range, not just the buckets that happen to hold data. */
+function chartSpan(data) {
+  const from = toDate(data?.from) || new Date();
+  const to = toDate(data?.to) || from;
+  return {
+    t0: from.getTime(),
+    t1: to.getTime(),
+    multiDay: from.toDateString() !== to.toDateString(),
+    multiYear: from.getFullYear() !== to.getFullYear(),
+    bucketMs: data?.bucket === 'day' ? 86400000 : 3600000,
+  };
+}
+
+/** A tooltip or axis label always carries the day when the range crosses midnight. */
+function fmtPoint(value, bucket, span) {
+  if (bucket === 'day') return fmtDay(value, span.multiYear);
+  return span.multiDay ? `${fmtDay(value, span.multiYear)} ${fmtTime(value)}` : fmtTime(value);
+}
+
+function fmtDay(value, withYear = false) {
+  const d = toDate(value);
+  if (!d) return '—';
+  return d.toLocaleDateString(
+    'it-IT',
+    withYear ? { day: '2-digit', month: '2-digit', year: 'numeric' } : { day: '2-digit', month: '2-digit' }
+  );
+}
+
 function relative(value) {
   const d = toDate(value);
   if (!d) return 'mai';
@@ -983,10 +1011,10 @@ function boilerChart() {
     </section>`;
   }
   const day = data.bucket === 'day';
-  // One slot per bucket of the range, so the bars sit on the same time axis as the chart above.
-  const slots = (data.points || []).length ? data.points.map((p) => new Date(p.at)) : points.map((p) => new Date(p.at));
-  const byAt = new Map(points.map((p) => [new Date(p.at).getTime(), p.seconds]));
-  const values = slots.map((at) => byAt.get(at.getTime()) || 0);
+  const axis = chartSpan(data);
+  // One bar per bucket of the range: the server fills the empty ones with zero, so the axis
+  // keeps every day or hour of the period instead of shrinking to the buckets with a value.
+  const values = points.map((p) => Math.max(0, p.seconds || 0));
   if (!values.some((v) => v > 0)) {
     barHover = null;
     return `<section class="card rise" style="--i:5">
@@ -994,7 +1022,7 @@ function boilerChart() {
       <div class="empty">${icon('flame')}<span>Nessuna accensione in questo periodo.</span></div>
     </section>`;
   }
-  barHover = { day, points: slots.map((at, i) => ({ at, seconds: values[i] })) };
+  barHover = { day, axis, points: points.map((p, i) => ({ at: new Date(p.at), seconds: values[i] })) };
   const max = Math.max(...values, 1);
   const total = values.reduce((sum, v) => sum + v, 0);
   const peak = Math.max(...values);
@@ -1025,7 +1053,7 @@ function showBarHover(event) {
   if (!point) return;
   bars.forEach((bar, i) => bar.classList.toggle('on', i === index));
   const tip = wrap.querySelector('.bars-tip');
-  const label = barHover.day ? fmtDate(point.at) : fmtTime(point.at);
+  const label = fmtPoint(point.at, barHover.day ? 'day' : 'hour', barHover.axis);
   tip.innerHTML = `<span>${esc(label)}</span><b>${esc(fmtDuration(point.seconds))}</b>`;
   tip.hidden = false;
   const center = ((index + 0.5) / bars.length) * rect.width;
@@ -1590,7 +1618,7 @@ function showChartHoverAt(plot, clientX) {
     })
     .join('');
 
-  const time = chartHover.bucket === 'day' ? fmtDate(nearest.at) : fmtTime(nearest.at);
+  const time = fmtPoint(nearest.at, chartHover.bucket, chartHover.axis);
   tip.innerHTML = `<span class="tip-time">${esc(time)}</span>${rows}`;
   tip.hidden = false;
   const tipWidth = tip.offsetWidth;
@@ -1616,7 +1644,13 @@ function temperatureChart() {
   if (!data) return `<div class="chart-empty"><span class="spinner"></span><span>Carico lo storico…</span></div>`;
   if (data.error) return `<div class="chart-empty">${icon('alert')}<span>${esc(data.error)}</span></div>`;
 
-  const avgPoints = (data.points || []).map((p) => ({ at: new Date(p.at), avg: p.avg, min: p.min, max: p.max }));
+  const axis = chartSpan(data);
+  const t0 = axis.t0;
+  const t1 = axis.t1;
+  const span = t1 - t0 || 1;
+  // Empty buckets belong to the axis, never to the line.
+  const realPoints = (data.points || []).filter((p) => (p.samples ?? 1) > 0);
+  const avgPoints = realPoints.map((p) => ({ at: new Date(p.at), avg: p.avg, min: p.min, max: p.max }));
   const drawAvg = state.chartSeries.includes('avg') && avgPoints.length > 0;
   const series = (data.series || []).filter((s) => state.chartSeries.includes(s.id));
   if (!drawAvg && !series.length) return `<div class="chart-empty">${icon('activity')}<span>Seleziona almeno una serie dal menu.</span></div>`;
@@ -1625,9 +1659,6 @@ function temperatureChart() {
   if (drawAvg) stamps.push(avgPoints[0].at.getTime(), avgPoints[avgPoints.length - 1].at.getTime());
   for (const s of series) for (const p of s.points) stamps.push(new Date(p.at).getTime());
   if (!stamps.length) return `<div class="chart-empty">${icon('activity')}<span>Nessun dato per questo periodo.</span></div>`;
-  const t0 = Math.min(...stamps);
-  const t1 = Math.max(...stamps);
-  const span = t1 - t0 || 1;
 
   const values = [];
   if (drawAvg) for (const p of avgPoints) values.push(p.min, p.max);
@@ -1648,26 +1679,64 @@ function temperatureChart() {
   const x = (ms) => ((ms - t0) / span) * W;
   const y = (v) => H - ((v - yMin) / (yMax - yMin)) * H;
 
-  const asPoints = (list, value) => list.map((p) => ({ x: x(new Date(p.at).getTime()), y: y(value(p)) }));
-  const band = drawAvg
-    ? (() => {
-        const upper = monotoneSamples(asPoints(avgPoints, (p) => p.max));
-        const lower = monotoneSamples(asPoints(avgPoints, (p) => p.min)).slice().reverse();
-        if (upper.length < 2 || lower.length < 2) return '';
-        const upperPath = upper.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-        const lowerPath = lower.map((p) => `L${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-        return `${upperPath} ${lowerPath} Z`;
-      })()
+  const asPoints = (list, value) =>
+    list.map((p) => {
+      const ms = new Date(p.at).getTime();
+      return { ms, x: x(ms), y: y(value(p)) };
+    });
+  // A hole longer than one bucket is missing data: the line stops instead of crossing it.
+  const runsOf = (points, gapMs) => {
+    const runs = [];
+    let run = [];
+    for (const point of points) {
+      if (run.length && point.ms - run[run.length - 1].ms > gapMs) {
+        runs.push(run);
+        run = [];
+      }
+      run.push(point);
+    }
+    if (run.length) runs.push(run);
+    return runs;
+  };
+  const gapMs = axis.bucketMs * 1.5;
+  const upperRuns = drawAvg ? runsOf(asPoints(avgPoints, (p) => p.max), gapMs) : [];
+  const lowerRuns = drawAvg ? runsOf(asPoints(avgPoints, (p) => p.min), gapMs) : [];
+  const band = upperRuns
+    .map((upper, i) => {
+      const lower = lowerRuns[i] || [];
+      if (upper.length < 2 || lower.length < 2) return '';
+      const upperPath = monotoneSamples(upper)
+        .map((p, j) => `${j ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+        .join(' ');
+      const lowerPath = monotoneSamples(lower)
+        .slice()
+        .reverse()
+        .map((p) => `L${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+        .join(' ');
+      return `${upperPath} ${lowerPath} Z`;
+    })
+    .filter(Boolean)
+    .join(' ');
+  const avgLine = drawAvg
+    ? runsOf(asPoints(avgPoints, (p) => p.avg), gapMs)
+        .filter((run) => run.length > 1)
+        .map(
+          (run) =>
+            `<path d="${monotonePath(run)}" fill="none" stroke="currentColor" style="color:var(--series-avg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`
+        )
+        .join('')
     : '';
-  const avgLine = drawAvg ? monotonePath(asPoints(avgPoints, (p) => p.avg)) : '';
   const sensorLines = series
     .map((s) => {
-      const points = asPoints(s.points, (p) => p.value);
-      if (!points.length) return '';
       const color = seriesColor(s.id);
-      if (points.length < 2) return '';
       const dash = seriesDash(s.id);
-      return `<path d="${monotonePath(points)}" fill="none" stroke="currentColor" style="color:${color}" stroke-width="1.8" stroke-opacity=".95" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke"/>`;
+      return runsOf(asPoints(s.points, (p) => p.value), gapMs)
+        .filter((run) => run.length > 1)
+        .map(
+          (run) =>
+            `<path d="${monotonePath(run)}" fill="none" stroke="currentColor" style="color:${color}" stroke-width="1.8" stroke-opacity=".95" stroke-linecap="round" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke"/>`
+        )
+        .join('');
     })
     .join('');
   // Samples are HTML dots, not SVG circles: the chart stretches a 640 unit viewBox across the
@@ -1687,11 +1756,11 @@ function temperatureChart() {
   const grid = [1, 2, 3].map((i) => `<line x1="0" y1="${(H / 4) * i}" x2="${W}" y2="${(H / 4) * i}" stroke="currentColor" stroke-opacity=".07" vector-effect="non-scaling-stroke"/>`).join('');
 
   const yLabels = [0, 1, 2, 3, 4].map((i) => `<span>${(yMax - ((yMax - yMin) / 4) * i).toFixed(1)}°</span>`).join('');
-  const tickCount = data.bucket === 'day' ? 4 : 5;
+  const tickCount = data.bucket === 'day' || axis.multiDay ? 4 : 5;
   const xLabels = [];
   for (let i = 0; i < tickCount; i += 1) {
     const at = new Date(t0 + (span * i) / (tickCount - 1));
-    xLabels.push(data.bucket === 'day' ? fmtDate(at) : fmtTime(at));
+    xLabels.push(fmtPoint(at, data.bucket, axis));
   }
 
   const last = drawAvg ? avgPoints[avgPoints.length - 1] : null;
@@ -1725,7 +1794,7 @@ function temperatureChart() {
     });
   }
   const hoverRef = hoverSeries[0]?.points || [];
-  chartHover = hoverRef.length ? { t0, span, bucket: data.bucket, ref: hoverRef, series: hoverSeries } : null;
+  chartHover = hoverRef.length ? { t0, span, bucket: data.bucket, axis, ref: hoverRef, series: hoverSeries } : null;
 
   return `<div data-key="${esc(key)}">
     <div class="chart" style="--chart-h:${H}px">

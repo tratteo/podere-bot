@@ -31,9 +31,10 @@ public sealed class BoilerRuntimeTests
         var result = TemperatureHistory.Build([], [], rows, "30d", from, to, Utc);
 
         Assert.Equal("day", result.Bucket);
-        Assert.Equal(2, result.Boiler.Count);
-        Assert.Equal(2700, result.Boiler[0].Seconds);
-        Assert.Equal(3600, result.Boiler[1].Seconds);
+        Assert.Equal(15, result.Boiler.Count);
+        Assert.Equal(2700, result.Boiler[12].Seconds);
+        Assert.Equal(3600, result.Boiler[13].Seconds);
+        Assert.All(result.Boiler.Where((_, i) => i != 12 && i != 13), b => Assert.Equal(0, b.Seconds));
     }
 
     [Fact]
@@ -50,8 +51,8 @@ public sealed class BoilerRuntimeTests
         var result = TemperatureHistory.Build([], [], rows, "today", from, to, Utc);
 
         Assert.Equal("hour", result.Bucket);
-        Assert.Equal(2, result.Boiler.Count);
-        Assert.Equal(1200, result.Boiler[0].Seconds);
-        Assert.Equal(60, result.Boiler[1].Seconds);
+        Assert.Equal(13, result.Boiler.Count);
+        Assert.Equal(1200, result.Boiler[6].Seconds);
+        Assert.Equal(60, result.Boiler[7].Seconds);
     }
 }
