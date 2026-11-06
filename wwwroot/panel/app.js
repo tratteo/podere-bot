@@ -1803,7 +1803,7 @@ function temperatureChart() {
           ${grid}
           ${band ? `<path d="${band}" fill="currentColor" style="color:var(--series-avg)" fill-opacity=".08"/>` : ''}
           ${sensorLines}
-          ${avgLine ? `<path d="${avgLine}" fill="none" stroke="currentColor" style="color:var(--series-avg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>` : ''}
+          ${avgLine}
         </svg>
         ${avgDots}${sensorDots}
         ${last ? `<span class="chart-dot" style="left:${((x(last.at.getTime()) / W) * 100).toFixed(2)}%;top:${y(last.avg).toFixed(1)}px;background:var(--series-avg)"></span>` : ''}
