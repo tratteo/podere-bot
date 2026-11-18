@@ -182,13 +182,13 @@ internal class TemperaturesCommand(
 
     private static string Escape(string value) => value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
-    protected override async Task OnMessage(Message message, UpdateType type)
-    {
-        await DetachEvents();
-    }
+    protected override Task OnMessage(Message message, UpdateType type) =>
+        message.Chat.Id == Arguments.Message.Chat.Id ? DetachEvents() : Task.CompletedTask;
 
-    protected override async Task OnUpdate(Update update)
-    {
-        await DetachEvents();
-    }
+    /// <summary>
+    /// The client events are global, so only a callback on this command's own chat may close the
+    /// screen: another user's activity must leave it open. Messages are handled by <see cref="OnMessage"/>.
+    /// </summary>
+    protected override Task OnUpdate(Update update) =>
+        update.CallbackQuery?.Message?.Chat.Id == Arguments.Message.Chat.Id ? DetachEvents() : Task.CompletedTask;
 }

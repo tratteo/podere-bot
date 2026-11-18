@@ -367,6 +367,9 @@ internal class HeatingCommand(
 
     protected override async Task OnMessage(Message message, UpdateType type)
     {
+        if (message.Chat.Id != Arguments.Message.Chat.Id)
+            return;
+
         try
         {
             if (message.Text == null)
