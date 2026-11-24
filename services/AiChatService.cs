@@ -37,21 +37,36 @@ internal class AiChatService(
                 return;
 
             var fullSystemPrompt = BuildSystemPrompt(message);
-            var userContents = await BuildUserContentsAsync(botClient, message, audio);
 
-            await botClient.SendChatAction(message.Chat.Id, ChatAction.Typing);
+            // Voice shows record-voice while it is downloaded and converted, typing while the answer
+            // is written; the text path only shows typing.
+            var userContents =
+                audio == null
+                    ? await BuildUserContentsAsync(botClient, message, null)
+                    : await WithChatActionAsync(
+                        botClient,
+                        message.Chat.Id,
+                        ChatAction.RecordVoice,
+                        () => BuildUserContentsAsync(botClient, message, audio)
+                    );
 
-            var response = await chatClient.GetResponseAsync(
-                [
-                    new ChatMessage(ChatRole.System, fullSystemPrompt),
-                    new ChatMessage(ChatRole.User, userContents),
-                ],
-                new ChatOptions
-                {
-                    Tools = [.. toolRegistry.AllAiFunctions],
-                    // The audio model advertises no effort levels, so the audio request leaves it out.
-                    Reasoning = audio == null ? new ReasoningOptions { Effort = GetReasoningEffort() } : null,
-                }
+            var response = await WithChatActionAsync(
+                botClient,
+                message.Chat.Id,
+                ChatAction.Typing,
+                () =>
+                    chatClient.GetResponseAsync(
+                        [
+                            new ChatMessage(ChatRole.System, fullSystemPrompt),
+                            new ChatMessage(ChatRole.User, userContents),
+                        ],
+                        new ChatOptions
+                        {
+                            Tools = [.. toolRegistry.AllAiFunctions],
+                            // The audio model advertises no effort levels, so the audio request leaves it out.
+                            Reasoning = audio == null ? new ReasoningOptions { Effort = GetReasoningEffort() } : null,
+                        }
+                    )
             );
 
             var responseText = response.Text;
@@ -70,6 +85,47 @@ internal class AiChatService(
         {
             currentUserId.Value = null;
             OpenCodeSession.Set(null);
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> with a chat action visible for its whole duration: Telegram
+    /// drops an action after five seconds, so it is sent again every four until the work ends.
+    /// </summary>
+    private async Task<T> WithChatActionAsync<T>(ITelegramBotClient botClient, long chatId, ChatAction action, Func<Task<T>> work)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var keepAlive = KeepChatActionAsync(botClient, chatId, action, cancellation.Token);
+        try
+        {
+            return await work();
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            await keepAlive;
+        }
+    }
+
+    private async Task KeepChatActionAsync(
+        ITelegramBotClient botClient,
+        long chatId,
+        ChatAction action,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            await botClient.SendChatAction(chatId, action, cancellationToken: cancellationToken);
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(4));
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+                await botClient.SendChatAction(chatId, action, cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            // The status is cosmetic: a failed refresh must never break the answer.
+            logger.LogDebug(ex, "unable to refresh the {action} chat action", action);
         }
     }
 
