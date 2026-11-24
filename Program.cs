@@ -86,6 +86,7 @@ builder.Services.AddHostedService(p => p.GetRequiredService<BotHostedService>())
 var aiSection = builder.Configuration.GetSection("AI");
 var endpoint = aiSection["Endpoint"]!;
 var model = aiSection["Model"]!;
+var audioModel = aiSection["AudioModel"];
 var zenApiKey = builder.Configuration.GetValue<string>("ZEN_API_KEY")!;
 
 var promptPath = Path.Combine(AppContext.BaseDirectory, "prompts", "system-prompt.md");
@@ -98,15 +99,22 @@ if (File.Exists(promptPath))
     builder.Configuration["AI:SystemPrompt"] = prompt;
 }
 
-builder.Services.AddSingleton<IChatClient>(sp =>
+builder.Services.AddSingleton<AiChatClients>(sp =>
 {
     var openAiOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint) };
     openAiOptions.AddPolicy(new OpenCodeSessionPolicy(), PipelinePosition.PerCall);
     var openAiClient = new OpenAIClient(new ApiKeyCredential(zenApiKey), openAiOptions);
-    var innerClient = openAiClient.GetChatClient(model).AsIChatClient();
-    return new ChatClientBuilder(innerClient).UseFunctionInvocation().Build(sp);
+
+    IChatClient Build(string modelId) =>
+        new ChatClientBuilder(openAiClient.GetChatClient(modelId).AsIChatClient()).UseFunctionInvocation().Build(sp);
+
+    // Audio answers come from a model that accepts audio input (DeepSeek does not); an empty
+    // AI:AudioModel keeps voice messages disabled without touching the text model.
+    IChatClient? audio = string.IsNullOrWhiteSpace(audioModel) ? null : Build(audioModel);
+    return new AiChatClients(Build(model), audio);
 });
 
+builder.Services.AddSingleton<AudioTranscoder>();
 builder.Services.AddSingleton<AiToolRegistry>();
 builder.Services.AddTransient<AiChatService>();
 

@@ -217,6 +217,14 @@ if [ "$MODE" != auto ]; then
     chown -R "$user":"$user" "$ROOT"
 fi
 
+# System packages are installed here, after the no-op exit, so every two-minute check stays quiet
+# and a failed apt run never happens while nothing is being deployed.
+if ! command -v ffmpeg &>/dev/null; then
+    echo - installing ffmpeg
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg || fail "cannot install ffmpeg (sudo apt install ffmpeg)"
+fi
+
 echo - generating scripts
 cat > "$ROOT/run.sh" <<'EOF'
 #!/bin/bash

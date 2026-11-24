@@ -26,7 +26,7 @@ sudo ./install.sh   # builds, installs and starts the services
 
 The bot starts at boot as `poderebot.service`. A watchdog checks `/api/health` every 10 minutes.
 
-The touch panel is served by the same process. On the Pi the HDMI screen opens `http://127.0.0.1:5051/panel/` in `cage` + `cog` through `poderebot-kiosk.service`; authorised tablets and phones use the LAN port `http://<pi>:5052/panel/` after a one-time pairing link. `install.sh` needs `cage` and `cog` (`sudo apt install cage cog`).
+The touch panel is served by the same process. On the Pi the HDMI screen opens `http://127.0.0.1:5051/panel/` in `cage` + `cog` through `poderebot-kiosk.service`; authorised tablets and phones use the LAN port `http://<pi>:5052/panel/` after a one-time pairing link. `install.sh` needs `cage` and `cog` (`sudo apt install cage cog`) and installs `ffmpeg` itself when it is missing, because the bot uses it to read voice messages.
 
 ## Update
 

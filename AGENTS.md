@@ -111,6 +111,8 @@ The crypto alerts engine was removed entirely together with its NuGet dependenci
 
 `UsageTracker` aggregates input, output and cached input tokens per day in `usage.json` (content root, gitignored), fed by every AI response. Each request's cost is computed when it is recorded, using prices and time multipliers fetched from `{AI:Endpoint}models` every 6 hours by `ModelPricing` (config prices act as fallback). `/status` sums the last 7 days and shows the cost as a percentage of `AI:WeeklyBudgetUsd`.
 
+Text goes to `AI:Model` (DeepSeek, text and images only), voice notes and audio files to `AI:AudioModel` (`mimo-v2.6-flash`, which accepts audio on the same zen endpoint). `AiChatClients` holds both and `AiChatService` picks one per message; both carry the same system prompt, tools and cost accounting, and `VideoNote`/photos are still ignored. An empty `AI:AudioModel` disables voice: the bot says so instead of ignoring the message, and a voice note longer than 600 seconds is refused. Voice is downloaded with `GetInfoAndDownloadFile` and converted to MP3 by `AudioTranscoder` through `ffmpeg`: `Microsoft.Extensions.AI` 10.6 maps only `audio/mpeg` and `audio/wav` to an `input_audio` part and drops any other media type from the request without an error, so the conversion is what keeps the audio from vanishing silently. The audio request carries no reasoning effort, because the audio model advertises no effort levels. `ModelPricing` prices the audio call with the `AI:Model` text prices, so its cost is an estimate. `install.sh` installs `ffmpeg` with `apt-get` when it is missing, after the `--auto` no-op exit so the two-minute check stays quiet.
+
 ## Formatting
 
 CSharpier (`.csharpierrc.json`): printWidth 140, tabWidth 4, no tabs.
